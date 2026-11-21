@@ -92,7 +92,9 @@ Ambiente: VM `efw-dev` (Rocky 10.3 aarch64, kernel 6.12.0-264, nftables
 - [x] VLAN 30 (convidados) com reject distinguido de drop e log no kernel.
 - [x] Tabela de terceiros preservada; reaplicação idempotente; lote quebrado
   recusado sem alterar o ruleset.
-- [x] Cenários adicionados ao CI (x86_64 e arm64).
+- [x] Cenários no CI: run 44935781368, `scenarios.sh` 36/36 em ubuntu-24.04
+  (x86_64) e ubuntu-24.04-arm (kernel e nftables do Ubuntu; o Rocky 10 é
+  coberto pela VM).
 
 Defeitos encontrados e corrigidos: objeto misto IPv4/IPv6 recusado em
 regra de uma família (agora filtra); log padrão sem limite (agora 10/s);
