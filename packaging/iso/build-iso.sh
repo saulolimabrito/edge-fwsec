@@ -16,13 +16,16 @@ done
 [[ -f $IN && -f $RPM && -f $KEY && -n $OUT ]] || { sed -n '2,7p' "$0"; exit 2; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 W=$(mktemp -d /var/tmp/efw-iso.XXXXXX)
-trap 'rm -rf "$W"' EXIT
+DB=$(mktemp -d /var/tmp/efw-rpmdb.XXXXXX)
+trap 'rm -rf "$W" "$DB"' EXIT
 
-# 1. The package must be signed by exactly this key (isolated keyring).
-mkdir -p "$W/rpmdb"; chcon -t rpm_var_lib_t "$W/rpmdb" 2>/dev/null || true
-rpm --dbpath "$W/rpmdb" --initdb
-rpm --dbpath "$W/rpmdb" --import "$KEY"
-rpm --dbpath "$W/rpmdb" -K "$RPM" | grep -q 'signatures OK' || { echo "RPM signature not valid for $KEY" >&2; exit 1; }
+# 1. The package must be signed by exactly this key (isolated keyring; rpm
+#    runs confined as rpm_t and may only write directories labelled as RPM
+#    databases, directly under /var/tmp).
+chcon -t rpm_var_lib_t "$DB" 2>/dev/null || true
+rpm --dbpath "$DB" --initdb
+rpm --dbpath "$DB" --import "$KEY"
+rpm --dbpath "$DB" -K "$RPM" | grep -q 'signatures OK' || { echo "RPM signature not valid for $KEY" >&2; exit 1; }
 
 # 2. The architecture of the package must match the media.
 iso_arch=$(xorriso -indev "$IN" -osirrox on -extract /.treeinfo "$W/treeinfo" >/dev/null 2>&1; sed -n 's/^arch *= *//p' "$W/treeinfo" | head -1)

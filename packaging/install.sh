@@ -212,16 +212,27 @@ else
 fi
 
 step "Preparing first access"
+# Same step as the ISO: efw-firstboot.service / `efwctl firstboot` writes
+# web.env (only if absent), issues the credential and shows it on the console.
+first_access_new=0
 if [[ -f /etc/edge-fwsec/web.env ]]; then
   say "    /etc/edge-fwsec/web.env exists; kept unchanged"
 elif [[ $DRY != 1 ]]; then
-  install -d -m 0755 /etc/edge-fwsec
-  printf '# Devices that serve the console before the first confirmed configuration.\nEFW_BOOTSTRAP_INTERFACES=%s\n' "$MGMT" >/etc/edge-fwsec/web.env
-  chmod 0644 /etc/edge-fwsec/web.env
-  restorecon -R /etc/edge-fwsec >/dev/null 2>&1 || true
-  say "    wrote /etc/edge-fwsec/web.env (bootstrap interface $MGMT)"
+  first_access_new=1
 fi
+run systemctl enable efw-firstboot.service
 run systemctl enable --now efw-agent.service
+if [[ $DRY != 1 ]]; then
+  efwctl firstboot --mgmt-interface "$MGMT" | sed 's/^/    /'
+  # Files written from this shell get the root user's SELinux identity;
+  # give them the same context the ISO's first boot produces.
+  restorecon -RF /etc/edge-fwsec /etc/issue.d/50-edge-fwsec.issue /var/lib/efw-web >/dev/null 2>&1 || true
+  # Mark the one-shot unit done, as on the ISO (its condition now skips it).
+  systemctl start efw-firstboot.service >/dev/null 2>&1 || true
+fi
+if [[ $first_access_new == 1 ]]; then
+  run systemctl restart efw-web.service
+fi
 run systemctl enable --now efw-web.service
 if [[ $DRY != 1 ]]; then
   for _ in $(seq 30); do systemctl is-active -q efw-web.service && break; sleep 1; done
@@ -235,8 +246,6 @@ if [[ $DRY == 1 ]]; then
 fi
 if [[ -s /var/lib/efw-web/users.json ]]; then
   say "    An administrator already exists; no bootstrap credential issued (efwctl bootstrap issues one)."
-else
-  efwctl bootstrap 24
 fi
 say ""
 say "Edge FWSec $pkg_evr is running. Open https://${mgmt_ip:-<address of $MGMT>}/ from the management network."

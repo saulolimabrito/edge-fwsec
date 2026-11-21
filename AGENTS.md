@@ -30,6 +30,10 @@ NAT, NetworkManager for interfaces, VLANs and routes.
 | Policy traffic scenarios (disposable VM, root) | `EFW_TEST_VM=1 tests/policy/scenarios.sh <efwctl> internal/policy/testdata/edge.json tests/topology/netns.sh` |
 | Agent lifecycle: confirm, deadline, kill -9, reboot, recover (VM, root) | `EFW_TEST_VM=1 tests/agent/lifecycle.sh dist/linux-aarch64 internal/policy/testdata/edge.json tests/topology/netns.sh tests/policy/httpd.py` |
 | NetworkManager checkpoints on a real NM (VM root namespace, root) | `EFW_TEST_VM=1 tests/nm/checkpoint.sh dist/linux-aarch64` |
+| Build RPM sources for both architectures (then `rpmbuild` on a Rocky 10 builder) | `make rpm-src` |
+| Build an ISO from verified official media (Rocky 10 builder with lorax) | `packaging/iso/build-iso.sh --iso IN --rpm RPM --key KEY --out OUT [--test-ssh-key PUB]` |
+| Installed-appliance end to end (installed VM, root, run detached) | `EFW_TEST_VM=1 tests/install/e2e.sh phase1\|phase2\|reboot-check [mgmt-dev]` |
+| Compare two installs (ISO vs installer) | `tests/install/fingerprint.sh` on each, then `diff` |
 | Local test VM (macOS, Lima) | `limactl start --name=efw-dev --mount-none template:rocky-10` |
 
 Linux tests from macOS: build the test binary with
@@ -114,4 +118,9 @@ docs/           architecture, threat model, checklist, topology, support matrix
   with `dnf` for the tests.
 - Rocky's udev rules leave veth devices unmanaged by NetworkManager unless
   they are named `eth<digit>…`; `tests/nm` relies on that.
-- The `rocky10-kea` VM belongs to another project: do not use or modify it.
+- The `rocky10-kea` VM belongs to another project and `efw-codex-restore` to a parallel
+  workstream: do not use or modify them. Lima test VMs here use `.ssh.overVsock=false`
+  (the vsock SSH forwarder looped after stops and filled the host log).
+- QEMU on macOS (Apple Silicon): `-machine virt,accel=hvf -cpu host`, EDK2 from
+  `/opt/homebrew/share/qemu/edk2-aarch64-code.fd`, console on `ttyAMA0`. macOS `tar` reads
+  ISO 9660 (`hdiutil` cannot mount the hybrid ISOs).

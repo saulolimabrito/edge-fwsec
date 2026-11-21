@@ -6,22 +6,21 @@ checked.
 
 ## ▶ Next concrete step
 
-Stage 4, ISO: build one ISO per architecture with `mkksiso` from the verified
-official Rocky Linux 10.3 Minimal media, with a kickstart that adds the same
-signed edge-fwsec RPM and its dependencies as an offline repository and runs
-the same first-access preparation as `packaging/install.sh` (no IP changes,
-bootstrap credential on the console). Keep disk selection interactive. Boot
-and install it in UEFI on aarch64 (QEMU/HVF on the Apple Silicon host) and
-x86_64 (CI lab), then run `tests/install/e2e.sh` on each install and compare
-services, permissions, SELinux labels and versions with the installer path.
+Stage 4, x86_64 ISO on the CI KVM runner (run 44944896846 proved KVM + UEFI
+boot of the official media there): build `edge-fwsec-*-x86_64-test.iso` with
+`packaging/iso/build-iso.sh` from the verified x86_64 Minimal ISO and the
+x86_64 RPM, install it offline (no NIC) in UEFI, boot from disk, run
+`tests/install/e2e.sh phase1` and `tests/install/fingerprint.sh`, and compare
+with an installer-path install on the same runner. Then the release key and
+SBOM attachment for the pre-release.
 
 ## External items / blockers
 
 | Item | Command | Result | What is missing |
 |---|---|---|---|
 | License ([#5](https://github.com/saulolimabrito/edge-fwsec/issues/5)) | — | not chosen; the repository is already public | Maintainer decision (e.g. GPL-3.0, Apache-2.0). |
-| Rocky 10 Minimal: is firewalld installed by default? ([#6](https://github.com/saulolimabrito/edge-fwsec/issues/6)) | — | not verified (current VM is GenericCloud, without firewalld or nftables) | Install from the official Minimal ISO in a VM and record `rpm -q firewalld nftables`. |
-| x86_64 VM ([#7](https://github.com/saulolimabrito/edge-fwsec/issues/7)) | — | not available locally (Apple Silicon host) | x86_64 host or runner with KVM for installer/ISO tests and UEFI boot. |
+| Rocky 10 Minimal: is firewalld installed by default? ([#6](https://github.com/saulolimabrito/edge-fwsec/issues/6)) | clean offline installs of the official 10.3 Minimal media, UEFI, no NIC: aarch64 (QEMU 11.1.3/HVF) and x86_64 (KVM, CI run 44944896846) | **yes: `firewalld-2.4.3-4.el10_2` enabled and active**; `nftables-1.1.5-6.el10_2` installed; SELinux enforcing | Resolved: the installer requires `--replace-firewalld` (snapshot + `--restore-firewalld`); the Edge FWSec ISO excludes firewalld. |
+| x86_64 VM ([#7](https://github.com/saulolimabrito/edge-fwsec/issues/7)) | CI run 44944896846 | a GitHub Ubuntu runner with KVM installed the official x86_64 Minimal ISO offline and booted it in UEFI | Use that runner for the x86_64 appliance ISO and installer tests. |
 
 Repository: https://github.com/saulolimabrito/edge-fwsec (public, created
 2026-11-21). Per-stage tracking in issues #1–#4.
@@ -206,14 +205,31 @@ NAT is out of scope for v1 (support matrix).
 - [x] SELinux module and hardened systemd units, validated in enforcing mode (see below)
 - [ ] Idempotent installer (checks Rocky 10, architecture, signature, conflicts)
 - [ ] Explicit and reversible firewalld transition
-- [ ] One ISO per architecture (mkksiso over verified official media), offline install
-- [ ] ISO vs installer comparison (services, permissions, SELinux, versions)
+- [x] aarch64 ISO (2026-11-21): `packaging/iso/build-iso.sh` (mkksiso, lorax 40.5.19) over
+  `Rocky-10.3-20261113.0-aarch64-minimal.iso`, re-verified here: SHA-256 OK and good signature
+  from "Release Engineering (Rocky Linux 10)", key fingerprint
+  FC22 6859 C086 0BF0 DDB9 5B08 5B10 6C73 6FED FC85. The ISO carries the same signed RPM
+  (sha256 e05513853953…) in an on-disc repository and records provenance in `BUILD-INFO`.
+  - Test variant, QEMU 11.1.3/HVF, EDK2 UEFI, **no NIC**: unattended install completed offline;
+    boot from disk: Rocky 10.3, SELinux enforcing, 0 AVCs, firewalld not installed, services
+    active in `efw_agent_t` / `efw_web_t`; `efw-firstboot` chose the management interface and
+    the local serial console showed the console URL and the one-time credential.
+    `tests/install/e2e.sh phase1` on that install: 20/20, 0 AVC/SELINUX_ERR.
+  - Release variant: boots to Anaconda's text hub with `[!] Installation Destination`,
+    `[!] Root password`, `[!] User creation` waiting for the operator; installation source and
+    software selection preconfigured; the blank disk stayed untouched (196 KiB qcow2).
+- [x] ISO vs installer comparison on aarch64 with the same RPM: `tests/install/fingerprint.sh`
+  (package and `rpm -V`, services, domains, effective sandbox, accounts, modes/owners/SELinux
+  labels, sysctl) is identical (35 lines). The first comparison found two differences, both from
+  the installer preparing first access with its own code; fixed by making the installer use the
+  same `efwctl firstboot` / `efw-firstboot.service` as the ISO.
+- [ ] x86_64 ISO built, installed offline in UEFI and compared (CI KVM runner)
 - [ ] Pre-release: clean install and upgrade
 
 ## v1.0.0 acceptance criteria
 
 - [ ] Four complete VM installs: installer and ISO on x86_64 and aarch64.
-- [ ] The ISO installs without network, boots the appliance and reaches first access.
+- [ ] The ISO installs without network, boots the appliance and reaches first access. (aarch64 done; x86_64 pending)
 - [ ] Both install paths deliver the same version and hardening profile per architecture.
 - [ ] The console works from authorized networks and is unreachable from the WAN in the default profile.
 - [ ] IPv4, IPv6, VLANs, routes, stateful firewall and NAT pass with real traffic, per the support matrix.
