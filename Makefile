@@ -12,11 +12,11 @@ DATE      := $(shell date -u -r $(SOURCE_DATE_EPOCH) +%Y-%m-%dT%H:%M:%SZ 2>/dev/
 PKG       := github.com/saulolimabrito/edge-fwsec/internal/version
 LDFLAGS   := -s -w -buildid= -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE)
 GOFLAGS_R := -trimpath -buildvcs=false -ldflags "$(LDFLAGS)"
-CMDS      := efw-web efwctl
+CMDS      := efw-web efw-agent efwctl
 export SOURCE_DATE_EPOCH
 export CGO_ENABLED := 0
 
-.PHONY: all ui ui-deps build linux check test test-go test-ui vet fmt-check repro clean run
+.PHONY: all ui ui-deps build linux check test test-go test-race test-ui vet fmt-check repro clean run
 
 all: check build
 
@@ -52,6 +52,9 @@ fmt-check:
 
 test-go:
 	$(GO) test -count=1 ./...
+
+test-race:
+	CGO_ENABLED=1 $(GO) test -race -count=2 ./internal/...
 
 test-ui: ui/node_modules
 	cd ui && $(NPM) run check && $(NPM) test

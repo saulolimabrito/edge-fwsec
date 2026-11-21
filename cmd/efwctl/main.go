@@ -29,6 +29,20 @@ commands:
   policy validate <file|->   validate a configuration (exit 1 with problems)
   policy render <file|->     print the nftables script for a configuration
   policy check <file|->      render and ask the kernel to validate it (nft --check, no changes)
+
+  status                     confirmed revision and revision under test (via efw-agent)
+  diff <file|->              ruleset diff against the confirmed revision
+  apply <file|-> [seconds]   apply with a confirmation deadline (base = confirmed)
+  confirm <revision>         keep the revision under test
+  rollback                   abandon the revision under test now
+  history [n]                audit log
+  show <revision>            print a stored configuration
+
+  recover                    console recovery: reapply the last confirmed revision.
+                             Uses efw-agent when it answers; otherwise reads the
+                             store directly (root, agent stopped).
+
+environment: EFW_SOCKET (default /run/efw/agent.sock), EFW_STATE_DIR (default /var/lib/efw)
 `
 
 func main() {
@@ -69,6 +83,10 @@ func main() {
 		})
 	case "policy":
 		os.Exit(policyCmd(os.Args[2:]))
+	case "status", "diff", "apply", "confirm", "rollback", "history", "show":
+		os.Exit(agentCmd(os.Args[1], os.Args[2:]))
+	case "recover":
+		os.Exit(recoverCmd())
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
