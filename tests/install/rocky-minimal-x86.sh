@@ -27,7 +27,7 @@ if [[ -c /dev/kvm && -r /dev/kvm && -w /dev/kvm ]]; then
     accel=kvm
 fi
 echo "Accelerator: $accel"
-vm=(qemu-system-x86_64 -machine "q35,accel=$accel" -cpu x86-64-v3
+vm=(qemu-system-x86_64 -machine "q35,accel=$accel" -cpu Haswell-v4
     -m 4096 -smp 2 -nic none -display none -monitor none -no-reboot
     -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd
     -drive if=pflash,format=raw,file=vars.fd
