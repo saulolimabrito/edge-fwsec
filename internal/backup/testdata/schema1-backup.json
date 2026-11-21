@@ -1,0 +1,275 @@
+{
+  "format": "edge-fwsec-backup",
+  "format_version": 1,
+  "schema_version": 1,
+  "revision": 3,
+  "exported_at": "2026-11-21T12:00:00Z",
+  "exported_by": "admin",
+  "app_version": "0.3.0-dev",
+  "config": {
+    "schema_version": 1,
+    "interfaces": [
+      {
+        "name": "wan",
+        "role": "wan",
+        "device": "wan0",
+        "ipv4": {
+          "mode": "static",
+          "addresses": [
+            "203.0.113.2/24"
+          ]
+        },
+        "ipv6": {
+          "mode": "static",
+          "addresses": [
+            "2001:db8:ffff::2/64"
+          ]
+        }
+      },
+      {
+        "name": "lan",
+        "role": "lan",
+        "device": "lan0",
+        "ipv4": {
+          "mode": "static",
+          "addresses": [
+            "192.168.10.1/24"
+          ]
+        },
+        "ipv6": {
+          "mode": "static",
+          "addresses": [
+            "2001:db8:10::1/64"
+          ]
+        }
+      },
+      {
+        "name": "guest",
+        "role": "opt",
+        "device": "lan0.30",
+        "vlan": {
+          "parent": "lan0",
+          "id": 30
+        },
+        "ipv4": {
+          "mode": "static",
+          "addresses": [
+            "192.168.30.1/24"
+          ]
+        },
+        "ipv6": {
+          "mode": "static",
+          "addresses": [
+            "2001:db8:30::1/64"
+          ]
+        }
+      },
+      {
+        "name": "mgmt",
+        "role": "mgmt",
+        "device": "mgmt0",
+        "ipv4": {
+          "mode": "static",
+          "addresses": [
+            "10.99.0.1/24"
+          ]
+        },
+        "ipv6": {
+          "mode": "static",
+          "addresses": [
+            "fd00:99::1/64"
+          ]
+        }
+      }
+    ],
+    "routes": [
+      {
+        "destination": "0.0.0.0/0",
+        "gateway": "203.0.113.1",
+        "interface": "wan"
+      },
+      {
+        "destination": "::/0",
+        "gateway": "2001:db8:ffff::1",
+        "interface": "wan"
+      }
+    ],
+    "networks": [
+      {
+        "name": "lan_net",
+        "prefixes": [
+          "192.168.10.0/24",
+          "2001:db8:10::/64"
+        ]
+      },
+      {
+        "name": "guest_net",
+        "prefixes": [
+          "192.168.30.0/24",
+          "2001:db8:30::/64"
+        ]
+      },
+      {
+        "name": "web_server",
+        "prefixes": [
+          "192.168.10.10/32",
+          "2001:db8:10::10/128"
+        ]
+      }
+    ],
+    "services": [
+      {
+        "name": "web",
+        "entries": [
+          {
+            "protocol": "tcp",
+            "ports": [
+              {
+                "from": 80,
+                "to": 80
+              },
+              {
+                "from": 443,
+                "to": 443
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "dns",
+        "entries": [
+          {
+            "protocol": "udp",
+            "ports": [
+              {
+                "from": 53,
+                "to": 53
+              }
+            ]
+          },
+          {
+            "protocol": "tcp",
+            "ports": [
+              {
+                "from": 53,
+                "to": 53
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "ping",
+        "entries": [
+          {
+            "protocol": "icmp"
+          },
+          {
+            "protocol": "icmpv6"
+          }
+        ]
+      }
+    ],
+    "admin": {
+      "port": 443,
+      "interfaces": [
+        "mgmt"
+      ],
+      "sources": []
+    },
+    "firewall": {
+      "default_input": "drop",
+      "default_forward": "drop",
+      "log_default": true,
+      "rules": [
+        {
+          "id": "lan-ping-fw",
+          "direction": "input",
+          "in": "lan",
+          "family": "any",
+          "service": "ping",
+          "action": "accept"
+        },
+        {
+          "id": "guest-no-lan",
+          "description": "Guests never reach the LAN",
+          "direction": "forward",
+          "in": "guest",
+          "out": "lan",
+          "family": "any",
+          "action": "reject",
+          "log": true
+        },
+        {
+          "id": "lan-out",
+          "direction": "forward",
+          "in": "lan",
+          "out": "wan",
+          "family": "any",
+          "source": [
+            "lan_net"
+          ],
+          "action": "accept"
+        },
+        {
+          "id": "guest-web-out",
+          "direction": "forward",
+          "in": "guest",
+          "out": "wan",
+          "family": "any",
+          "service": "web",
+          "action": "accept"
+        },
+        {
+          "id": "guest-dns-out",
+          "direction": "forward",
+          "in": "guest",
+          "out": "wan",
+          "family": "any",
+          "service": "dns",
+          "action": "accept"
+        },
+        {
+          "id": "web6-in",
+          "description": "Routed IPv6 publish of the web server",
+          "direction": "forward",
+          "in": "wan",
+          "out": "lan",
+          "family": "ipv6",
+          "destination": [
+            "web_server"
+          ],
+          "service": "web",
+          "action": "accept"
+        }
+      ]
+    },
+    "nat": {
+      "source": [
+        {
+          "id": "lan-masq",
+          "out": "wan",
+          "source": [
+            "192.168.0.0/16"
+          ],
+          "mode": "masquerade"
+        }
+      ],
+      "port_forwards": [
+        {
+          "id": "web-in",
+          "description": "Publish the LAN web server",
+          "in": "wan",
+          "protocol": "tcp",
+          "external_ports": {
+            "from": 8080,
+            "to": 8080
+          },
+          "target": "192.168.10.10",
+          "target_port": 80
+        }
+      ]
+    }
+  }
+}
