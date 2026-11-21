@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/saulolimabrito/edge-fwsec/internal/fsutil"
 	"github.com/saulolimabrito/edge-fwsec/internal/policy"
 )
 
@@ -334,44 +335,6 @@ func (s *Store) revPath(n int) string {
 	return filepath.Join(s.dir, "revisions", strconv.Itoa(n)+".json")
 }
 
-// writeAtomic replaces path with data: temp file in the same directory,
-// fsync, rename, fsync of the directory.
 func writeAtomic(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	ok := false
-	defer func() {
-		if !ok {
-			os.Remove(tmp)
-		}
-	}()
-	if err := f.Chmod(perm); err != nil {
-		f.Close()
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	ok = true
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
+	return fsutil.WriteAtomic(path, data, perm)
 }
