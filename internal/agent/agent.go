@@ -21,11 +21,22 @@ type Applier interface {
 	Apply(ctx context.Context, script string) error
 }
 
+// Network applies the interface/VLAN/route part of a configuration under
+// a checkpoint (NetworkManager in production; nil disables the step).
+type Network interface {
+	Begin(ctx context.Context, cfg *policy.Config, deadline time.Duration) (checkpoint string, err error)
+	Commit(ctx context.Context, checkpoint string) error
+	// Rollback restores the checkpoint, or rewrites the confirmed
+	// configuration (nil = none) when the checkpoint is gone.
+	Rollback(ctx context.Context, checkpoint string, confirmed *policy.Config) error
+}
+
 // Agent owns the apply/confirm/rollback state machine. The confirmation
 // deadline is enforced here, not by the client.
 type Agent struct {
 	Store          *store.Store
 	NFT            Applier
+	Network        Network // optional
 	Log            *slog.Logger
 	MinTimeout     time.Duration // default 30s
 	MaxTimeout     time.Duration // default 10m
@@ -61,6 +72,7 @@ func (a *Agent) Recover(ctx context.Context) error {
 	a.defaults()
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.rollbackNetworkLocked(ctx)
 	if rev, err := a.Store.EndTest("recover", "efw-agent", "agent started while the revision was under test"); err != nil {
 		return err
 	} else if rev != 0 {
@@ -218,6 +230,21 @@ func (a *Agent) applyLocked(ctx context.Context, req *Request, author string) Re
 	if err := a.Store.BeginTest(rev.Number, deadline, author); err != nil {
 		return fail(CodeBusy, err.Error())
 	}
+	// Network first (under a checkpoint), then the firewall that refers
+	// to its devices. Rollback runs in the opposite order of trust:
+	// network restored first, then the confirmed ruleset.
+	if a.Network != nil {
+		cp, err := a.Network.Begin(ctx, c, timeout)
+		if err != nil {
+			a.Log.Error("network apply failed, rolling back", "revision", rev.Number, "err", err)
+			a.Store.Audit(store.Event{Action: "apply_failed", Revision: rev.Number, Author: author, Result: "network: " + err.Error()})
+			a.rollbackLocked(ctx, "efw-agent", "network apply failed")
+			return fail(CodeApply, "network: "+err.Error())
+		}
+		if err := a.Store.SetCheckpoint(rev.Number, cp); err != nil {
+			a.Log.Error("could not record checkpoint", "err", err)
+		}
+	}
 	if err := a.NFT.Apply(ctx, script); err != nil {
 		a.Log.Error("apply failed, rolling back", "revision", rev.Number, "err", err)
 		a.Store.Audit(store.Event{Action: "apply_failed", Revision: rev.Number, Author: author, Result: err.Error()})
@@ -230,6 +257,18 @@ func (a *Agent) applyLocked(ctx context.Context, req *Request, author string) Re
 }
 
 func (a *Agent) confirmLocked(rev int, author string) Response {
+	st := a.Store.State()
+	if st.Testing == nil || st.Testing.Revision != rev {
+		return fail(CodeNotTesting, fmt.Sprintf("revision %d is not under test", rev))
+	}
+	if a.Network != nil && st.Testing.Checkpoint != "" {
+		if err := a.Network.Commit(context.Background(), st.Testing.Checkpoint); err != nil {
+			// The network may already have been restored by NetworkManager;
+			// do not confirm a state we cannot vouch for.
+			a.rollbackLocked(context.Background(), "efw-agent", "network checkpoint could not be released: "+err.Error())
+			return fail(CodeApply, "network checkpoint could not be released; the change was rolled back")
+		}
+	}
 	if err := a.Store.Confirm(rev, author); err != nil {
 		if errors.Is(err, store.ErrNotTesting) {
 			return fail(CodeNotTesting, fmt.Sprintf("revision %d is not under test", rev))
@@ -245,6 +284,7 @@ func (a *Agent) confirmLocked(rev int, author string) Response {
 // confirmed revision. Returns the abandoned revision.
 func (a *Agent) rollbackLocked(ctx context.Context, author, reason string) int {
 	a.disarmLocked()
+	a.rollbackNetworkLocked(ctx)
 	rev, err := a.Store.EndTest("rollback", author, reason)
 	if err != nil {
 		a.Log.Error("could not record rollback", "err", err)
@@ -254,6 +294,24 @@ func (a *Agent) rollbackLocked(ctx context.Context, author, reason string) int {
 	}
 	a.Log.Warn("rolled back", "revision", rev, "reason", reason)
 	return rev
+}
+
+// rollbackNetworkLocked restores the network of a revision under test.
+func (a *Agent) rollbackNetworkLocked(ctx context.Context) {
+	st := a.Store.State()
+	if a.Network == nil || st.Testing == nil || st.Testing.Checkpoint == "" {
+		return
+	}
+	var confirmed *policy.Config
+	if st.Confirmed != 0 {
+		if r, err := a.Store.Get(st.Confirmed); err == nil {
+			confirmed, _ = r.Decode()
+		}
+	}
+	if err := a.Network.Rollback(ctx, st.Testing.Checkpoint, confirmed); err != nil {
+		a.Log.Error("CRITICAL: network rollback failed", "checkpoint", st.Testing.Checkpoint, "err", err)
+		a.Store.Audit(store.Event{Action: "network_rollback_failed", Revision: st.Testing.Revision, Author: "efw-agent", Result: err.Error()})
+	}
 }
 
 func (a *Agent) applyConfirmedLocked(ctx context.Context, why string) error {

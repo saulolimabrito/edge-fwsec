@@ -55,6 +55,9 @@ type Testing struct {
 	StartedAt time.Time `json:"started_at"`
 	Deadline  time.Time `json:"deadline"`
 	Author    string    `json:"author"`
+	// Checkpoint is the NetworkManager checkpoint guarding the network part
+	// of the change ("" when the change has no network step).
+	Checkpoint string `json:"checkpoint,omitempty"`
 }
 
 // State is the durable apply state. Confirmed is 0 before the first
@@ -214,6 +217,20 @@ func (s *Store) BeginTest(rev int, deadline time.Time, author string) error {
 	}
 	s.audit(Event{Action: "apply", Revision: rev, Author: author, Result: "testing until " + deadline.UTC().Format(time.RFC3339)})
 	return nil
+}
+
+// SetCheckpoint records the NetworkManager checkpoint of the revision under test.
+func (s *Store) SetCheckpoint(rev int, cp string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.st.Testing == nil || s.st.Testing.Revision != rev {
+		return ErrNotTesting
+	}
+	next := s.st
+	t := *s.st.Testing
+	t.Checkpoint = cp
+	next.Testing = &t
+	return s.commit(next)
 }
 
 // Confirm makes the revision under test the confirmed one.

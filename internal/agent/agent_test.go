@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/saulolimabrito/edge-fwsec/internal/policy"
 	"github.com/saulolimabrito/edge-fwsec/internal/store"
 )
 
@@ -285,5 +286,106 @@ func TestSocketRoundTripAndPermissions(t *testing.T) {
 	os.WriteFile(reg, []byte("x"), 0o600)
 	if _, err := Listen(reg, ""); err == nil {
 		t.Fatal("Listen replaced a regular file")
+	}
+}
+
+type fakeNet struct {
+	mu                     sync.Mutex
+	began, commits, rolled int
+	failBegin, failCommit  bool
+	lastConfirmed          *int // number of interfaces in the confirmed config passed to Rollback
+}
+
+func (n *fakeNet) Begin(_ context.Context, c *policy.Config, _ time.Duration) (string, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.failBegin {
+		return "", errors.New("nm: simulated failure")
+	}
+	n.began++
+	return "/org/freedesktop/NetworkManager/Checkpoint/" + string(rune('0'+n.began)), nil
+}
+func (n *fakeNet) Commit(context.Context, string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.failCommit {
+		return errors.New("checkpoint gone")
+	}
+	n.commits++
+	return nil
+}
+func (n *fakeNet) Rollback(_ context.Context, _ string, c *policy.Config) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.rolled++
+	k := 0
+	if c != nil {
+		k = len(c.Interfaces)
+	}
+	n.lastConfirmed = &k
+	return nil
+}
+
+func TestNetworkCheckpointLifecycle(t *testing.T) {
+	a, _ := newAgent(t, t.TempDir())
+	n := &fakeNet{}
+	a.Network = n
+	a.Recover(context.Background())
+	r := apply(a, edge(t), 0, 30*time.Second)
+	if !r.OK || a.Store.State().Testing.Checkpoint == "" {
+		t.Fatalf("checkpoint not recorded: %+v %+v", r.Error, a.Store.State().Testing)
+	}
+	a.Handle(context.Background(), &Request{Op: OpConfirm, Revision: 1}, "t")
+	if n.commits != 1 {
+		t.Fatal("confirm must release the checkpoint")
+	}
+	apply(a, edge(t), 1, 30*time.Second)
+	a.Handle(context.Background(), &Request{Op: OpRollback}, "t")
+	if n.rolled != 1 || n.lastConfirmed == nil || *n.lastConfirmed != 4 {
+		t.Fatalf("rollback must restore network with the confirmed config: %+v", n)
+	}
+}
+
+func TestNetworkFailureRollsBackFirewallToo(t *testing.T) {
+	a, f := newAgent(t, t.TempDir())
+	a.Network = &fakeNet{failBegin: true}
+	a.Recover(context.Background())
+	r := apply(a, edge(t), 0, 30*time.Second)
+	if r.OK || r.Error.Code != CodeApply || !strings.Contains(r.Error.Message, "network") {
+		t.Fatalf("%+v", r.Error)
+	}
+	if strings.Contains(f.last(), "chain") || a.Store.State().Testing != nil {
+		t.Fatal("firewall must stay at the confirmed (empty) state")
+	}
+}
+
+func TestConfirmRefusedWhenCheckpointCannotBeReleased(t *testing.T) {
+	a, _ := newAgent(t, t.TempDir())
+	n := &fakeNet{failCommit: true}
+	a.Network = n
+	a.Recover(context.Background())
+	apply(a, edge(t), 0, 30*time.Second)
+	r := a.Handle(context.Background(), &Request{Op: OpConfirm, Revision: 1}, "t")
+	if r.OK || a.Store.State().Confirmed != 0 || n.rolled != 1 {
+		t.Fatalf("%+v %+v", r, a.Store.State())
+	}
+}
+
+func TestRecoverRollsBackPendingCheckpoint(t *testing.T) {
+	dir := t.TempDir()
+	a, _ := newAgent(t, dir)
+	a.Network = &fakeNet{}
+	a.Recover(context.Background())
+	apply(a, edge(t), 0, 30*time.Second)
+	a.mu.Lock()
+	a.disarmLocked()
+	a.mu.Unlock()
+	a.Store.Close()
+	a2, _ := newAgent(t, dir)
+	n2 := &fakeNet{}
+	a2.Network = n2
+	a2.Recover(context.Background())
+	if n2.rolled != 1 || a2.Store.State().Testing != nil {
+		t.Fatalf("pending checkpoint not rolled back on recovery: %+v", n2)
 	}
 }

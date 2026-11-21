@@ -14,6 +14,7 @@ import (
 
 	"github.com/saulolimabrito/edge-fwsec/internal/agent"
 	"github.com/saulolimabrito/edge-fwsec/internal/nft"
+	"github.com/saulolimabrito/edge-fwsec/internal/nm"
 	"github.com/saulolimabrito/edge-fwsec/internal/store"
 	"github.com/saulolimabrito/edge-fwsec/internal/version"
 )
@@ -23,6 +24,7 @@ func main() {
 	socket := flag.String("socket", "/run/efw/agent.sock", "Unix socket path")
 	group := flag.String("socket-group", "efw", "group allowed to use the socket (empty: keep current)")
 	nftBin := flag.String("nft", "nft", "nft binary")
+	network := flag.String("network", "nm", "network backend: nm (NetworkManager checkpoints) or none")
 	minTimeout := flag.Duration("min-timeout", 30*time.Second, "shortest confirmation window")
 	maxTimeout := flag.Duration("max-timeout", 10*time.Minute, "longest confirmation window")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -32,19 +34,36 @@ func main() {
 		return
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	if err := run(log, *stateDir, *socket, *group, *nftBin, *minTimeout, *maxTimeout); err != nil {
+	if *network != "nm" && *network != "none" {
+		log.Error("invalid -network", "value", *network)
+		os.Exit(2)
+	}
+	if err := run(log, *stateDir, *socket, *group, *nftBin, *network, *minTimeout, *maxTimeout); err != nil {
 		log.Error("efw-agent", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger, stateDir, socket, group, nftBin string, minT, maxT time.Duration) error {
+func run(log *slog.Logger, stateDir, socket, group, nftBin, network string, minT, maxT time.Duration) error {
 	st, err := store.Open(stateDir)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
 	a := &agent.Agent{Store: st, NFT: nft.Runner{Binary: nftBin}, Log: log, MinTimeout: minT, MaxTimeout: maxT}
+	if network == "nm" {
+		c, err := nm.Connect()
+		if err != nil {
+			return fmt.Errorf("NetworkManager: %w", err)
+		}
+		defer c.Close()
+		v, err := c.Version()
+		if err != nil {
+			return fmt.Errorf("NetworkManager not reachable on the system bus: %w", err)
+		}
+		log.Info("network backend", "networkmanager", v)
+		a.Network = agent.NMNetwork{N: &nm.Network{Client: c}}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	// Recovery comes before the socket opens: nobody can start a change
