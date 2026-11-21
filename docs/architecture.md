@@ -1,8 +1,9 @@
 # Architecture — Edge FWSec v1
 
-Status: stages 1 (read-only console), 2 (policy engine) and the agent part of
-stage 3 (revisions, apply/confirm/rollback, NetworkManager checkpoints) are
-implemented. Sections marked **[planned]** are the contract for the next
+Status: stages 1 (console base), 2 (policy engine) and 3 (agent with
+revisions, apply/confirm/rollback, NetworkManager checkpoints; authenticated
+HTTPS console with the full change flow) are implemented. Packaging, systemd
+units and SELinux (stage 4) are not. Sections marked **[planned]** are the contract for the next
 stages; changing them requires updating this file and the threat model.
 
 ## v1 scope
@@ -27,7 +28,7 @@ VLANs, web administration and a recovery CLI. Out of scope for v1
 
 | Component | State | Privilege | Responsibility |
 |---|---|---|---|
-| `efw-web` | read-only API | none | API, sessions, CSRF, embedded UI. Never changes the system. |
+| `efw-web` | implemented | none | HTTPS console and API, accounts, sessions, CSRF, management-network check, backup/restore preview, certificate management. Never changes the system: policy operations go to the agent. |
 | `efw-agent` | implemented (nftables, NetworkManager, store, deadline, recovery) | root, `CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW` + D-Bus | Validates, applies, times and rolls back changes. Owns the confirmation deadline. |
 | `efwctl` | implemented | root for recovery | Diagnostics, apply/confirm/rollback from the console, `recover` with the agent down. Planned: reissue the bootstrap credential. |
 
@@ -39,18 +40,67 @@ link kind and VLAN ID. `/proc/net/vlan/*` is `0600 root` on Rocky 10, so the
 unprivileged process does not use it (verified in the VM). Missing values
 are `null`.
 
-### Web API (implemented, read-only)
+### Web console and API (implemented: `internal/web`, `internal/auth`, `internal/tlsutil`, `internal/backup`)
 
-| Method | Path | Response |
+HTTPS only (`[::]:443` by default). A self-signed ECDSA P-256 certificate is
+generated at first start (names: hostname, loopback, global addresses) and can
+be replaced by an uploaded chain + key (pair, validity, server-auth usage and
+key strength checked) without a restart; TLS 1.2 minimum.
+
+Access is checked twice: the nftables rule (stage 2) and, server side, the
+local address of each connection must belong to a management interface of
+the confirmed configuration — or to `-bootstrap-interfaces` before the first
+confirmation — and the client must match `admin.sources` when set. Loopback
+is always allowed (local console, SSH tunnel).
+
+Accounts live in `/var/lib/efw-web` (0700): Argon2id hashes (OWASP minimum
+m=19 MiB, t=2, p=1), passwords of at least 12 characters. First access and
+password recovery use a one-time credential issued on the local console with
+`efwctl bootstrap` (120-bit, 24 h by default, stored as a SHA-256 hash,
+deleted on use). Sessions are in memory: `__Host-efw_session` cookie
+(`Secure`, `HttpOnly`, `SameSite=Strict`), 15 min idle and 8 h absolute
+expiry. Mutations need the per-session `X-CSRF-Token` and a same-origin
+request (`Sec-Fetch-Site`/`Origin`). Login attempts are limited per client
+address (10 per 5 min) and per user (lockout from the 6th failure, doubling
+from 30 s up to 15 min).
+
+| Method | Path | Notes |
 |---|---|---|
-| GET | `/healthz` | `{"status":"ok"}` |
-| GET | `/api/v1/version` | version, commit, build date |
-| GET | `/api/v1/system` | hostname, os-release, kernel, architecture, uptime |
-| GET | `/api/v1/interfaces` | interfaces, IPv4/IPv6 addresses, counters, `observed_at` |
+| GET | `/healthz` | unauthenticated, for local probes |
+| GET | `/api/v1/session` | `authenticated`, `user`, `csrf`, `needs_bootstrap`, `bootstrap_pending` |
+| POST | `/api/v1/login`, `/api/v1/bootstrap` | rate limited, same-origin only |
+| POST | `/api/v1/logout`, `/api/v1/password` | session + CSRF |
+| GET | `/api/v1/version`, `/system`, `/interfaces` | session |
+| GET | `/api/v1/policy/status`, `/config`, `/history`, `/revisions/{n}` | proxied to the agent |
+| POST | `/api/v1/policy/validate`, `/diff`, `/apply`, `/confirm`, `/rollback` | proxied to the agent; author = session user |
+| GET | `/api/v1/backup` | confirmed configuration as a download |
+| POST | `/api/v1/restore/preview` | parse, migrate, validate and diff a backup (applying is a normal `apply`) |
+| GET/POST/DELETE | `/api/v1/tls` | certificate info, upload, return to self-signed |
 
-Any other method under `/api/` → 405; unknown path → JSON 404. Headers:
-CSP `default-src 'self'` without inline, `X-Frame-Options: DENY`,
+Agent errors map to HTTP: invalid config 422 (with `problems`), conflict or
+busy 409, apply failure 502, agent unreachable 503. Headers: CSP
+`default-src 'self'` without inline, HSTS, `X-Frame-Options: DENY`,
 `nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` on the API.
+
+Backups (`edge-fwsec-backup`, format 1) wrap one revision with its schema
+version and never contain accounts, hashes or keys. Import refuses unknown
+fields, other formats and newer schemas, and runs registered migrations for
+older schemas; `internal/backup/testdata/schema1-backup.json` pins a real
+schema-1 backup that must keep importing.
+
+### Console UI (implemented: `ui/`)
+
+Sign-in and administrator setup; Overview (host, links, policy status, last
+change); Interfaces (live counters and rates); Network (interfaces, VLANs,
+routes, console access); Firewall rules (per-direction numbered tables with
+the implicit rules in their evaluation position, move up/down buttons, editor);
+Objects; NAT (source NAT, port forwards with the generated forward rule);
+Changes (validate, ruleset diff, management-access warning, confirmation
+window, apply); History; System (backup download, restore preview, certificate,
+password); First access wizard (WAN/LAN/management). A banner with the
+countdown and Keep/Roll back is shown on every page while a revision is under
+test. The draft is edited client side and kept in `sessionStorage` per user
+and base revision.
 
 ## Configuration model (implemented: `internal/policy`)
 

@@ -21,8 +21,9 @@ NAT, NetworkManager for interfaces, VLANs and routes.
 | Local build (UI + host binaries) | `make build` |
 | Appliance binaries (linux x86_64 v3 + aarch64) and `dist/SHA256SUMS` | `make linux` |
 | Reproducible-build proof (two builds, hashes compared) | `make repro` |
-| Local console on 127.0.0.1:8080 | `make run` |
-| UI dev server proxying to :8080 | `cd ui && npm run dev` |
+| Local stack: agent (fake `nft`, no network changes) + HTTPS console on 127.0.0.1:8443, prints a bootstrap credential | `make run` |
+| UI dev server on http://localhost:5173 proxying to the local stack | `cd ui && npm run dev` |
+| Issue a one-time administrator credential (appliance console) | `efwctl bootstrap [hours]` |
 | Validate / render / kernel-check a configuration | `efwctl policy validate\|render\|check <file>` |
 | Refresh the generator's golden output (review the diff!) | `go test ./internal/nft -update` |
 | Test topology (disposable VM only, as root) | `EFW_TEST_VM=1 tests/topology/netns.sh up\|verify\|down` |
@@ -42,9 +43,10 @@ with `limactl copy` and run it in the `efw-dev` VM. Never run `netns.sh`,
 cmd/efw-web     unprivileged web server (console + API)
 cmd/efw-agent   privileged service: revision store, apply/confirm/rollback, recovery
 cmd/efwctl      local diagnostics and recovery CLI
-internal/       Go packages: sysinfo, web, version, policy (model + validation),
+internal/       Go packages: sysinfo, web (API, access check), auth (accounts, bootstrap,
+                sessions, limiter), tlsutil, backup, version, policy (model + validation),
                 nft (generator + loader), nm (NetworkManager profiles + checkpoints),
-                store (revisions), agent (state machine + socket protocol), textdiff
+                store (revisions), agent (state machine + socket protocol), fsutil, textdiff
 ui/             Svelte console; `ui/dist` is generated and embedded (only `.keep` is tracked)
 tests/topology  WAN/LAN/VLAN/MGMT topology in network namespaces
 tests/policy    policy traffic scenarios (36 checks)
@@ -56,7 +58,8 @@ docs/           architecture, threat model, checklist, topology, support matrix
 ## Conventions
 
 - Go: standard library unless there is a documented reason. Current
-  exception: `github.com/godbus/dbus/v5` for the NetworkManager D-Bus API.
+  exceptions: `github.com/godbus/dbus/v5` (NetworkManager D-Bus API) and
+  `golang.org/x/crypto/argon2` (password hashing).
   `gofmt`; errors carry context; no `panic` on request paths.
 - Frontend: Svelte 5 runes, strict TypeScript, no inline CSS/JS (the CSP
   blocks `style=` attributes and inline scripts), no external fonts or
@@ -80,8 +83,10 @@ docs/           architecture, threat model, checklist, topology, support matrix
    `efw-agent` over a Unix socket (0660, dedicated group) with a typed,
    per-operation protocol, validated on both sides. No shell, no arbitrary
    commands, no free-text nftables from the API.
-2. Without TLS and authentication the web server only listens on loopback
-   (`checkLoopback` in `cmd/efw-web`). Keep that guard until stage 3 is complete.
+2. The console is HTTPS only and every API call except session discovery,
+   login and bootstrap needs a session; mutations need the CSRF token and a
+   same-origin request. Requests are served only on management-interface
+   addresses (or loopback), checked server side in addition to nftables.
 3. The project only changes the nftables tables it owns (`inet efw_filter`
    and `ip efw_nat`), by atomic replacement; never `flush ruleset`. Foreign
    tables are preserved. NetworkManager profiles are owned only when the id

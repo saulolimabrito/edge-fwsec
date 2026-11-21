@@ -6,14 +6,17 @@ checked.
 
 ## ▶ Next concrete step
 
-Stage 3, web side: HTTPS on `efw-web` with a self-signed certificate
-generated at first start (replaceable by an uploaded one), local bootstrap
-with a one-time credential shown only on the console (`efwctl bootstrap`),
-admin login (Argon2id), sessions with idle and absolute expiry in
-`__Host-` cookies, CSRF tokens on mutations, login rate limiting, and the
-web → agent client over the Unix socket. Then lift the loopback-only guard
-for the management interfaces. Before: confirm Go's `crypto/tls` defaults
-and Argon2id parameters against current OWASP guidance.
+Stage 4, first increment: systemd units (`efw-agent.service` before
+`network-online.target`, `efw-web.service` as a dedicated user with
+`AmbientCapabilities=CAP_NET_BIND_SERVICE`, both with `ProtectSystem=strict`,
+`NoNewPrivileges` and explicit `ReadWritePaths`), `/etc/sysctl.d` for
+forwarding, and an RPM spec that installs binaries, units, users and state
+directories. Before applying a policy on an installed VM, add SSH access on
+management interfaces to the model (schema 2, with a migration from schema 1
+and a test using the pinned schema-1 backup) so an installed appliance stays
+reachable for recovery. Then install the RPM on a fresh disposable Rocky 10
+VM (not `efw-dev`'s root namespace) and run the full flow through the UI,
+including a real reboot during a pending change.
 
 ## External items / blockers
 
@@ -138,11 +141,27 @@ hairpin NAT is out of scope for v1 (support matrix).
 - [x] Recovery `efwctl`: `status`, `diff`, `apply`, `confirm`, `rollback`,
   `history`, `show`, `recover` (direct store access when the agent is down).
 - [ ] Real VM reboot during a pending change (needs the systemd unit; stage 4)
-- [ ] HTTPS, one-time bootstrap, login, sessions, CSRF, rate limiting, custom certificate
-- [ ] Console restricted to the management network by default (service side)
-- [ ] First access: WAN, LAN, management
-- [ ] Rules/objects/NAT/routes/VLANs in the UI with diff and countdown
-- [ ] Audit view (author, time, result); backup/validation/restore
+- [ ] SSH access on management interfaces in the model (schema 2 + migration)
+- [x] HTTPS with self-signed certificate and custom upload, one-time bootstrap,
+  login, sessions, CSRF, rate limiting. `go test ./internal/auth ./internal/tlsutil
+  ./internal/web` (TLS test server, real accounts, in-process agent).
+- [x] Console restricted to the management network by default, server side
+  (local address of a management interface, `admin.sources`; loopback always).
+- [x] Backup download and restore preview with schema compatibility
+  (`go test ./internal/backup`, pinned schema-1 backup).
+- [x] UI flows reviewed in a browser against the local stack (`scripts/dev.sh`,
+  fake `nft`, 2026-11-21): administrator setup with the one-time credential →
+  First access wizard → Changes (validated diff) → apply with countdown banner
+  on every page → Keep changes → History with author, time and result; rule
+  added and reordered by keyboard; draft indicator; light and dark themes;
+  375 px width without page-level horizontal scroll. Defects found and fixed:
+  focus stayed on the old row after moving a rule; the rule editor did not
+  receive focus; "rolls back to revision 0" wording; author spacing in
+  History; the draft was lost on reload (now kept in `sessionStorage`, with a
+  restore race fixed).
+- [ ] UI flows against an installed appliance with real nftables and
+  NetworkManager (stage 4 VM), including reconnecting through a new
+  management address
 
 ## Stage 4 — Distribution
 
