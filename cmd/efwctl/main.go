@@ -5,11 +5,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"text/tabwriter"
 
+	"github.com/saulolimabrito/edge-fwsec/internal/nft"
+	"github.com/saulolimabrito/edge-fwsec/internal/policy"
 	"github.com/saulolimabrito/edge-fwsec/internal/sysinfo"
 	"github.com/saulolimabrito/edge-fwsec/internal/version"
 )
@@ -20,6 +25,10 @@ commands:
   version      print build version
   system       host identity and uptime
   interfaces   kernel interface state and counters
+
+  policy validate <file|->   validate a configuration (exit 1 with problems)
+  policy render <file|->     print the nftables script for a configuration
+  policy check <file|->      render and ask the kernel to validate it (nft --check, no changes)
 `
 
 func main() {
@@ -58,9 +67,68 @@ func main() {
 			}
 			tw.Flush()
 		})
+	case "policy":
+		os.Exit(policyCmd(os.Args[2:]))
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
+	}
+}
+
+func policyCmd(args []string) int {
+	if len(args) != 2 {
+		fmt.Fprint(os.Stderr, usage)
+		return 2
+	}
+	var in io.Reader = os.Stdin
+	if args[1] != "-" {
+		f, err := os.Open(args[1])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "efwctl:", err)
+			return 1
+		}
+		defer f.Close()
+		in = f
+	}
+	c, err := policy.Decode(in)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "efwctl:", err)
+		return 1
+	}
+	if err := policy.Validate(c); err != nil {
+		var ps policy.Problems
+		if errors.As(err, &ps) {
+			for _, p := range ps {
+				fmt.Fprintf(os.Stderr, "%s: %s\n", p.Path, p.Message)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "efwctl:", err)
+		}
+		return 1
+	}
+	switch args[0] {
+	case "validate":
+		fmt.Println("valid")
+		return 0
+	case "render", "check":
+		script, err := nft.Render(c)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "efwctl:", err)
+			return 1
+		}
+		if args[0] == "render" {
+			fmt.Print(script)
+			return 0
+		}
+		if err := (nft.Runner{}).Check(context.Background(), script); err != nil {
+			fmt.Fprintln(os.Stderr, "efwctl:", err)
+			return 1
+		}
+		fmt.Println("kernel accepts the ruleset (not applied)")
+		return 0
+	default:
+		fmt.Fprint(os.Stderr, usage)
+		return 2
 	}
 }
 
