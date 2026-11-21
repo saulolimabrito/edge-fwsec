@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Edge FWSec reference test topology built from network namespaces.
 #
-#   efw-inet ── efw-wanr ══(wan)══ efw-fw ══(lan, trunk vlan 30)══ efw-lan
-#                                    ║
+#   efw-inet ── efw-wanr ══(wan)══ efw-fw ══(lan0 trunk)══ efw-lan (untagged)
+#                                    ║                       └─ eth0.30 → efw-guest (VLAN 30)
 #                                  (mgmt)
 #                                    ║
 #                                 efw-mgmt
@@ -14,7 +14,7 @@
 # usage: sudo EFW_TEST_VM=1 tests/topology/netns.sh up|down|verify|status
 set -euo pipefail
 
-NS=(efw-fw efw-wanr efw-inet efw-lan efw-mgmt)
+NS=(efw-fw efw-wanr efw-inet efw-lan efw-guest efw-mgmt)
 
 die() { echo "netns.sh: $*" >&2; exit 1; }
 guard() {
@@ -56,9 +56,12 @@ up() {
   addr efw-lan eth0 192.168.10.10/24; addr efw-lan eth0 2001:db8:10::10/64
   nsx efw-fw  ip link add link lan0 name lan0.30 type vlan id 30
   nsx efw-lan ip link add link eth0 name eth0.30 type vlan id 30
-  nsx efw-fw  ip link set lan0.30 up; nsx efw-lan ip link set eth0.30 up
-  addr efw-fw  lan0.30 192.168.30.1/24;  addr efw-fw  lan0.30 2001:db8:30::1/64
-  addr efw-lan eth0.30 192.168.30.10/24; addr efw-lan eth0.30 2001:db8:30::10/64
+  # The guest client gets the VLAN device in its own namespace (the parent
+  # stays in efw-lan), so guest traffic really originates tagged on VLAN 30.
+  nsx efw-lan ip link set eth0.30 netns efw-guest
+  nsx efw-fw  ip link set lan0.30 up; nsx efw-guest ip link set eth0.30 up
+  addr efw-fw    lan0.30 192.168.30.1/24;  addr efw-fw    lan0.30 2001:db8:30::1/64
+  addr efw-guest eth0.30 192.168.30.10/24; addr efw-guest eth0.30 2001:db8:30::10/64
   # Management network (ULA for IPv6).
   addr efw-fw   mgmt0 10.99.0.1/24;  addr efw-fw   mgmt0 fd00:99::1/64
   addr efw-mgmt eth0  10.99.0.10/24; addr efw-mgmt eth0  fd00:99::10/64
@@ -79,7 +82,8 @@ up() {
   nsx efw-inet ip -6 route add default via 2001:db8:100::1
   nsx efw-lan  ip route add default via 192.168.10.1
   nsx efw-lan  ip -6 route add default via 2001:db8:10::1
-  nsx efw-lan  ip route add 192.168.30.0/24 dev eth0.30 2>/dev/null || true
+  nsx efw-guest ip route add default via 192.168.30.1
+  nsx efw-guest ip -6 route add default via 2001:db8:30::1
   nsx efw-mgmt ip route add default via 10.99.0.1
   nsx efw-mgmt ip -6 route add default via fd00:99::1
 }
@@ -98,8 +102,9 @@ verify() {
   local p="ping -c3 -i0.2 -W2"  # tolerate first-packet ND/ARP resolution
   check "lan  -> fw      v4"  nsx efw-lan  $p 192.168.10.1
   check "lan  -> fw      v6"  nsx efw-lan  $p 2001:db8:10::1
-  check "vlan30 -> fw    v4"  nsx efw-lan  $p -I eth0.30 192.168.30.1
-  check "vlan30 -> fw    v6"  nsx efw-lan  $p -I eth0.30 2001:db8:30::1
+  check "vlan30 -> fw    v4"  nsx efw-guest $p 192.168.30.1
+  check "vlan30 -> fw    v6"  nsx efw-guest $p 2001:db8:30::1
+  check "vlan30 -> inet  v4 (routed)" nsx efw-guest $p 198.51.100.10
   check "mgmt -> fw      v4"  nsx efw-mgmt $p 10.99.0.1
   check "mgmt -> fw      v6"  nsx efw-mgmt $p fd00:99::1
   check "lan  -> inet    v4 (routed)" nsx efw-lan $p 198.51.100.10
