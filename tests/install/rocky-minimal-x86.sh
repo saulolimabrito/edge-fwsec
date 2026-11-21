@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Probe the untouched Rocky Minimal package selection in an offline UEFI VM.
+# Run this on a disposable x86_64 runner with QEMU and OVMF installed.
+set -euo pipefail
+
+test "$(uname -m)" = x86_64
+fixture=$(cd "$(dirname "$0")" && pwd)/rocky-minimal-x86.ks
+mkdir -p "${1:?private working directory}"
+cd "$1"
+iso=Rocky-10.3-20261113.0-x86_64-minimal.iso
+# From the vendor-signed per-ISO CHECKSUM (Rocky Linux 10 release key).
+checksum=878a3f92281d3eb91ca9d1a195794d47b5bce4e02a85f351c606709e98481cc4
+curl --fail --location --silent --show-error --retry 2 --output "$iso" \
+    "https://dl.rockylinux.org/pub/rocky/10/isos/x86_64/$iso"
+printf '%s  %s\n' "$checksum" "$iso" | sha256sum -c -
+label=$(blkid -s LABEL -o value "$iso")
+label=${label// /\\x20}
+xorriso -osirrox on -indev "$iso" -extract /images/pxeboot/vmlinuz ./vmlinuz \
+    -extract /images/pxeboot/initrd.img ./initrd.img
+install -m 0644 "$fixture" ks.cfg
+printf 'ks.cfg\n' | cpio --quiet -o -H newc | gzip >> initrd.img
+qemu-img create -f qcow2 disk.qcow2 16G
+cp /usr/share/OVMF/OVMF_VARS_4M.fd vars.fd
+
+accel=tcg
+if [[ -c /dev/kvm && -r /dev/kvm && -w /dev/kvm ]]; then
+    accel=kvm
+fi
+echo "Accelerator: $accel"
+vm=(qemu-system-x86_64 -machine "q35,accel=$accel" -cpu x86-64-v3
+    -m 4096 -smp 2 -nic none -display none -monitor none -no-reboot
+    -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd
+    -drive if=pflash,format=raw,file=vars.fd
+    -drive if=virtio,format=qcow2,file=disk.qcow2)
+timeout 22m "${vm[@]}" -serial stdio -cdrom "$iso" \
+    -kernel vmlinuz -initrd initrd.img \
+    -append "console=ttyS0,115200n8 inst.stage2=hd:LABEL=$label inst.ks=file:/ks.cfg inst.noninteractive" \
+    | tee install.log
+timeout 5m "${vm[@]}" -serial stdio | tee first-boot.log
+rg -x 'EFW_MINIMAL_UEFI=1\r?' first-boot.log
+rg -x 'EFW_MINIMAL_PROBE_DONE\r?' first-boot.log
