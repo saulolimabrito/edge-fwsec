@@ -70,7 +70,7 @@ func expectProblem(t *testing.T, name, path, msg string, mutate func(c *Config))
 }
 
 func TestValidationProblems(t *testing.T) {
-	expectProblem(t, "schema", "schema_version", "unsupported", func(c *Config) { c.SchemaVersion = 2 })
+	expectProblem(t, "schema", "schema_version", "unsupported", func(c *Config) { c.SchemaVersion = 3 })
 	expectProblem(t, "dup iface", "interfaces[1].name", "duplicate", func(c *Config) { c.Interfaces[1].Name = "wan" })
 	expectProblem(t, "bad device", "interfaces[0].device", "invalid", func(c *Config) { c.Interfaces[0].Device = "eth0;rm" })
 	expectProblem(t, "long device", "interfaces[0].device", "invalid", func(c *Config) { c.Interfaces[0].Device = "abcdefghijklmnop" })
@@ -129,10 +129,16 @@ func TestValidationProblems(t *testing.T) {
 		pf.ExternalPorts = PortRange{8000, 8100}
 		c.NAT.PortForwards = append(c.NAT.PortForwards, pf)
 	})
-	expectProblem(t, "pf shadows admin", "nat.port_forwards[0].external_ports", "management console", func(c *Config) {
+	expectProblem(t, "pf shadows admin", "nat.port_forwards[0].external_ports", "management port 443", func(c *Config) {
 		c.NAT.PortForwards[0].In = "mgmt"
 		c.NAT.PortForwards[0].ExternalPorts = PortRange{443, 443}
 	})
+	expectProblem(t, "pf shadows ssh", "nat.port_forwards[0].external_ports", "management port 22", func(c *Config) {
+		c.NAT.PortForwards[0].In = "mgmt"
+		c.NAT.PortForwards[0].ExternalPorts = PortRange{From: 22, To: 22}
+		c.NAT.PortForwards[0].TargetPort = 0
+	})
+	expectProblem(t, "ssh same port", "admin.ssh_port", "share a port", func(c *Config) { c.Admin.SSHPort = 443 })
 	expectProblem(t, "pf range remap", "nat.port_forwards[0].target_port", "single external port", func(c *Config) {
 		c.NAT.PortForwards[0].ExternalPorts = PortRange{8080, 8090}
 	})
@@ -168,5 +174,28 @@ func TestFamilies(t *testing.T) {
 		if err != nil || strings.Join(got, ",") != want {
 			t.Errorf("%s: got %v %v want %s", r.ID, got, err, want)
 		}
+	}
+}
+
+func TestSchema1Upgrades(t *testing.T) {
+	b, err := os.ReadFile("testdata/edge-schema1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, from, err := DecodeVersioned(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if from != 1 || c.SchemaVersion != SchemaVersion || c.Admin.SSH || c.Admin.SSHPort != 22 {
+		t.Fatalf("from=%d %+v", from, c.Admin)
+	}
+	if err := Validate(c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Decode(bytes.NewReader([]byte(`{"schema_version": 99}`))); err == nil || !strings.Contains(err.Error(), "newer than this build") {
+		t.Fatalf("newer schema: %v", err)
+	}
+	if _, err := Decode(bytes.NewReader([]byte(`{"schema_version": 0}`))); err == nil {
+		t.Fatal("schema 0 accepted")
 	}
 }

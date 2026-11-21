@@ -53,8 +53,8 @@ func TestSchema1BackupStaysReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Revision != 3 || len(c.Firewall.Rules) == 0 {
-		t.Fatalf("%+v", info)
+	if info.Revision != 3 || len(c.Firewall.Rules) == 0 || info.MigratedFrom != 1 || c.Admin.SSH {
+		t.Fatalf("%+v %+v", info, c.Admin)
 	}
 }
 

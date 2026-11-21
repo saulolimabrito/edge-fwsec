@@ -240,7 +240,7 @@ func TestPolicyLifecycleThroughAPI(t *testing.T) {
 	if code != 200 || m["diff"] != "" || m["info"].(map[string]any)["revision"].(float64) != 1 {
 		t.Fatalf("restore preview %d %v", code, m)
 	}
-	newer := bytes.Replace(bk, []byte(`"schema_version": 1,`), []byte(`"schema_version": 9,`), 1)
+	newer := bytes.Replace(bk, []byte(`"schema_version": 2,`), []byte(`"schema_version": 9,`), 1)
 	if code, m := e.do(t, "POST", "/api/v1/restore/preview", newer, nil); code != 422 || !strings.Contains(mustJSON(m), "newer than this build") {
 		t.Fatalf("newer backup %d %v", code, m)
 	}

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "interfaces": [
     {"name": "wan", "role": "wan", "device": "wan0",
      "ipv4": {"mode": "static", "addresses": ["203.0.113.2/24"]},
@@ -28,7 +28,7 @@
     {"name": "dns", "entries": [{"protocol": "udp", "ports": [{"from": 53, "to": 53}]}, {"protocol": "tcp", "ports": [{"from": 53, "to": 53}]}]},
     {"name": "ping", "entries": [{"protocol": "icmp"}, {"protocol": "icmpv6"}]}
   ],
-  "admin": {"port": 443, "interfaces": ["mgmt"], "sources": []},
+  "admin": {"port": 443, "ssh": true, "ssh_port": 22, "interfaces": ["mgmt"], "sources": []},
   "firewall": {
     "default_input": "drop",
     "default_forward": "drop",

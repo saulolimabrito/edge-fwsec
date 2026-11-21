@@ -389,3 +389,39 @@ func TestRecoverRollsBackPendingCheckpoint(t *testing.T) {
 		t.Fatalf("pending checkpoint not rolled back on recovery: %+v", n2)
 	}
 }
+
+// TestUpgradeKeepsSchema1Revision simulates upgrading Edge FWSec on an
+// appliance whose confirmed revision was stored by a schema-1 build.
+func TestUpgradeKeepsSchema1Revision(t *testing.T) {
+	dir := t.TempDir()
+	a, _ := newAgent(t, dir)
+	a.Recover(context.Background())
+	apply(a, edge(t), 0, 30*time.Second)
+	a.Handle(context.Background(), &Request{Op: OpConfirm, Revision: 1}, "t")
+	a.Store.Close()
+
+	old, err := os.ReadFile("../policy/testdata/edge-schema1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "revisions", "1.json")
+	var rev map[string]json.RawMessage
+	b, _ := os.ReadFile(p)
+	json.Unmarshal(b, &rev)
+	rev["config"] = old
+	b, _ = json.Marshal(rev)
+	os.WriteFile(p, b, 0o600)
+
+	a2, f2 := newAgent(t, dir)
+	if err := a2.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	s := f2.last()
+	if !strings.Contains(s, "efw:rule:lan-out") || !strings.Contains(s, `tcp dport 443 accept comment "efw:admin"`) {
+		t.Fatalf("schema-1 revision not reapplied as migrated (SSH must stay closed):\n%s", s)
+	}
+	r := a2.Handle(context.Background(), &Request{Op: OpGet, Revision: 1}, "t")
+	if !r.OK {
+		t.Fatal(r.Error)
+	}
+}

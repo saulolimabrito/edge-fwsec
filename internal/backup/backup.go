@@ -46,14 +46,6 @@ func Export(cfg *policy.Config, rev int, by, appVersion string, now time.Time) (
 		Revision: rev, ExportedAt: now.UTC(), ExportedBy: by, AppVersion: appVersion, Config: raw}, "", "  ")
 }
 
-// Migration upgrades a raw configuration document by one schema version.
-type Migration func(map[string]any) error
-
-// migrations[n] upgrades schema n to n+1. Empty while only schema 1 exists;
-// every future schema bump adds an entry and a test with a real backup of
-// the previous version (see backup_test.go).
-var migrations = map[int]Migration{}
-
 // Info summarizes an imported backup.
 type Info struct {
 	Revision      int       `json:"revision"`
@@ -87,35 +79,16 @@ func Import(b []byte) (*policy.Config, *Info, error) {
 	if env.SchemaVersion < 1 {
 		return nil, nil, fmt.Errorf("invalid schema version %d", env.SchemaVersion)
 	}
-	raw := []byte(env.Config)
-	info := &Info{Revision: env.Revision, ExportedAt: env.ExportedAt, ExportedBy: env.ExportedBy, AppVersion: env.AppVersion, SchemaVersion: policy.SchemaVersion}
-	if env.SchemaVersion < policy.SchemaVersion {
-		var doc map[string]any
-		if err := json.Unmarshal(raw, &doc); err != nil {
-			return nil, nil, err
-		}
-		for v := env.SchemaVersion; v < policy.SchemaVersion; v++ {
-			m, ok := migrations[v]
-			if !ok {
-				return nil, nil, fmt.Errorf("no migration from schema %d", v)
-			}
-			if err := m(doc); err != nil {
-				return nil, nil, fmt.Errorf("migrating schema %d: %w", v, err)
-			}
-			doc["schema_version"] = v + 1
-		}
-		info.MigratedFrom = env.SchemaVersion
-		var err error
-		if raw, err = json.Marshal(doc); err != nil {
-			return nil, nil, err
-		}
-	}
-	cfg, err := policy.Decode(bytes.NewReader(raw))
+	cfg, from, err := policy.DecodeVersioned(bytes.NewReader(env.Config))
 	if err != nil {
 		return nil, nil, err
 	}
-	if cfg.SchemaVersion != policy.SchemaVersion {
+	if from != env.SchemaVersion {
 		return nil, nil, errors.New("schema_version inside the configuration does not match the envelope")
+	}
+	info := &Info{Revision: env.Revision, ExportedAt: env.ExportedAt, ExportedBy: env.ExportedBy, AppVersion: env.AppVersion, SchemaVersion: policy.SchemaVersion}
+	if from != policy.SchemaVersion {
+		info.MigratedFrom = from
 	}
 	if err := policy.Validate(cfg); err != nil {
 		return nil, nil, err

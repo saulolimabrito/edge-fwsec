@@ -13,7 +13,10 @@ import (
 
 // SchemaVersion is the configuration schema this build reads and writes.
 // Bumping it requires a migration in migrate.go and a compatibility test.
-const SchemaVersion = 1
+//
+//	1: initial schema
+//	2: admin.ssh / admin.ssh_port (SSH on management interfaces)
+const SchemaVersion = 2
 
 // Config is the whole appliance configuration (one revision).
 type Config struct {
@@ -101,6 +104,8 @@ type PortRange struct {
 // Admin controls who may reach the management console on the appliance.
 type Admin struct {
 	Port       int      `json:"port"`       // HTTPS port, default 443
+	SSH        bool     `json:"ssh"`        // also allow SSH on the same interfaces/sources
+	SSHPort    int      `json:"ssh_port"`   // default 22
 	Interfaces []string `json:"interfaces"` // logical interfaces allowed; never a WAN
 	Sources    []string `json:"sources"`    // network objects or literal prefixes; empty = any on those interfaces
 }
@@ -164,8 +169,29 @@ type PortForward struct {
 }
 
 // Decode reads a Config strictly: unknown fields and trailing data are
-// errors, so typos cannot silently drop a rule.
+// errors, so typos cannot silently drop a rule. Documents written by an
+// older schema are upgraded first (see migrate.go); newer ones are refused.
 func Decode(r io.Reader) (*Config, error) {
+	c, _, err := DecodeVersioned(r)
+	return c, err
+}
+
+// DecodeVersioned is Decode that also reports the schema the document was
+// written with (equal to SchemaVersion when no migration ran).
+func DecodeVersioned(r io.Reader) (*Config, int, error) {
+	raw, err := io.ReadAll(io.LimitReader(r, 4<<20))
+	if err != nil {
+		return nil, 0, err
+	}
+	raw, from, err := Upgrade(raw)
+	if err != nil {
+		return nil, 0, err
+	}
+	c, err := decodeCurrent(bytes.NewReader(raw))
+	return c, from, err
+}
+
+func decodeCurrent(r io.Reader) (*Config, error) {
 	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()
 	var c Config
@@ -194,6 +220,9 @@ func (c *Config) Canonical() ([]byte, error) {
 func (c *Config) applyDefaults() {
 	if c.Admin.Port == 0 {
 		c.Admin.Port = 443
+	}
+	if c.Admin.SSHPort == 0 {
+		c.Admin.SSHPort = 22
 	}
 	if c.Firewall.DefaultInput == "" {
 		c.Firewall.DefaultInput = "drop"

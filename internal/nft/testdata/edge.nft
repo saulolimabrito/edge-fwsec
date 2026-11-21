@@ -14,7 +14,7 @@ table inet efw_filter {
 		icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept comment "efw:icmpv6-errors"
 		icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } ip6 hoplimit 255 accept comment "efw:icmpv6-nd"
 		icmpv6 type { mld-listener-query, mld-listener-report, mld-listener-done, mld2-listener-report } ip6 saddr fe80::/10 accept comment "efw:icmpv6-mld"
-		iifname "mgmt0" tcp dport 443 accept comment "efw:admin"
+		iifname "mgmt0" tcp dport { 22, 443 } accept comment "efw:admin"
 		iifname "lan0" meta l4proto icmp counter accept comment "efw:rule:lan-ping-fw"
 		iifname "lan0" meta l4proto ipv6-icmp counter accept comment "efw:rule:lan-ping-fw"
 		limit rate 10/second burst 20 packets log prefix "efw default input " comment "efw:default-log"

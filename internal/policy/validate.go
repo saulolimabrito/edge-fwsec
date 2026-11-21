@@ -266,6 +266,11 @@ func (v *validator) admin() {
 	if a.Port < 1 || a.Port > 65535 {
 		v.add("admin.port", "invalid port")
 	}
+	if a.SSHPort < 1 || a.SSHPort > 65535 {
+		v.add("admin.ssh_port", "invalid port")
+	} else if a.SSH && a.SSHPort == a.Port {
+		v.add("admin.ssh_port", "SSH and the console cannot share a port")
+	}
 	if len(a.Interfaces) == 0 {
 		v.add("admin.interfaces", "at least one interface must allow management access, or the console becomes unreachable")
 	}
@@ -470,11 +475,17 @@ func (v *validator) nat() {
 			r    PortRange
 			path string
 		}{f.ExternalPorts, p})
-		// The console port on a management interface must not be shadowed.
-		if f.Protocol == "tcp" && f.ExternalPorts.From <= v.c.Admin.Port && v.c.Admin.Port <= f.ExternalPorts.To {
-			for _, a := range v.c.Admin.Interfaces {
-				if a == f.In {
-					v.add(p+".external_ports", "would shadow the management console port %d on %s", v.c.Admin.Port, f.In)
+		// Management ports on a management interface must not be shadowed.
+		mports := []int{v.c.Admin.Port}
+		if v.c.Admin.SSH {
+			mports = append(mports, v.c.Admin.SSHPort)
+		}
+		for _, port := range mports {
+			if f.Protocol == "tcp" && f.ExternalPorts.From <= port && port <= f.ExternalPorts.To {
+				for _, a := range v.c.Admin.Interfaces {
+					if a == f.In {
+						v.add(p+".external_ports", "would shadow the management port %d on %s", port, f.In)
+					}
 				}
 			}
 		}

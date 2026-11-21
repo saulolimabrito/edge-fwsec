@@ -167,8 +167,12 @@ func (r *renderer) admin(ind int) error {
 		devs = append(devs, r.dev[n])
 	}
 	base := fmt.Sprintf("iifname %s", nameSet(devs))
+	ports := fmt.Sprint(a.Port)
+	if a.SSH {
+		ports = fmt.Sprintf("{ %d, %d }", min(a.Port, a.SSHPort), max(a.Port, a.SSHPort))
+	}
 	if len(a.Sources) == 0 {
-		r.w(ind, `%s tcp dport %d accept comment "efw:admin"`, base, a.Port)
+		r.w(ind, `%s tcp dport %s accept comment "efw:admin"`, base, ports)
 		return nil
 	}
 	pfx, err := policy.Resolve(r.c, a.Sources)
@@ -177,7 +181,7 @@ func (r *renderer) admin(ind int) error {
 	}
 	for _, fam := range []string{"ipv4", "ipv6"} {
 		if s := prefixSet(pfx, fam); s != "" {
-			r.w(ind, `%s %s saddr %s tcp dport %d accept comment "efw:admin"`, base, famKw(fam), s, a.Port)
+			r.w(ind, `%s %s saddr %s tcp dport %s accept comment "efw:admin"`, base, famKw(fam), s, ports)
 		}
 	}
 	return nil
