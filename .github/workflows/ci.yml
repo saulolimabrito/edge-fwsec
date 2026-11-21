@@ -32,6 +32,11 @@ jobs:
       - run: make repro
       - name: netns topology (disposable runner)
         run: sudo EFW_TEST_VM=1 tests/topology/netns.sh up && sudo EFW_TEST_VM=1 tests/topology/netns.sh verify
+      - name: policy traffic scenarios (disposable runner)
+        run: |
+          sudo apt-get install -y -q nftables
+          make build
+          sudo EFW_TEST_VM=1 tests/policy/scenarios.sh dist/local/efwctl internal/policy/testdata/edge.json tests/topology/netns.sh
       - uses: actions/upload-artifact@v4
         if: matrix.runner == 'ubuntu-24.04'
         with:
