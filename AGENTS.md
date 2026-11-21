@@ -56,6 +56,9 @@ docs/           arquitetura, ameaças, checklist, topologia, matriz de suporte
   configuração dupla para TS 7.
 - Commits pequenos, em inglês, imperativos; cada etapa atualiza o checklist
   com o que foi verificado e como.
+- Autoria única: `Saulo Brito <100214355+saulolimabrito@users.noreply.github.com>`.
+  Commits, merges, PRs e Issues não levam trailers `Co-Authored-By` nem
+  rodapés de ferramentas de geração.
 - Textos de documentação em português; código, identificadores e mensagens
   da UI em inglês.
 
