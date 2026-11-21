@@ -38,11 +38,14 @@ commands:
   history [n]                audit log
   show <revision>            print a stored configuration
 
+  bootstrap [hours]          console only: issue a one-time credential (default 24h) to create
+                             or reset an administrator from the web console
   recover                    console recovery: reapply the last confirmed revision.
                              Uses efw-agent when it answers; otherwise reads the
                              store directly (root, agent stopped).
 
-environment: EFW_SOCKET (default /run/efw/agent.sock), EFW_STATE_DIR (default /var/lib/efw)
+environment: EFW_SOCKET (default /run/efw/agent.sock), EFW_STATE_DIR (default /var/lib/efw),
+             EFW_WEB_STATE_DIR (default /var/lib/efw-web)
 `
 
 func main() {
@@ -87,6 +90,8 @@ func main() {
 		os.Exit(agentCmd(os.Args[1], os.Args[2:]))
 	case "recover":
 		os.Exit(recoverCmd())
+	case "bootstrap":
+		os.Exit(bootstrapCmd(os.Args[2:]))
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)

@@ -71,9 +71,10 @@ repro:
 	$(MAKE) linux >/dev/null
 	diff -u dist/SHA256SUMS.first dist/SHA256SUMS && echo 'reproducible: OK'
 
+# Local stack on https://127.0.0.1:8443 with a fake nft (see scripts/dev.sh).
 run: build
-	dist/local/efw-web -listen 127.0.0.1:8080
+	scripts/dev.sh
 
 clean:
-	rm -rf dist/local dist/linux-x86_64 dist/linux-aarch64 ui/dist/assets
+	rm -rf dist/local dist/linux-x86_64 dist/linux-aarch64 dist/dev-state ui/dist/assets
 	rm -f dist/SHA256SUMS dist/SHA256SUMS.first ui/dist/index.html ui/dist/favicon.svg
