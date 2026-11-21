@@ -48,7 +48,12 @@ jobs:
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
-    container: docker.io/rockylinux/rockylinux:10
+    container:
+      image: docker.io/rockylinux/rockylinux:10
+      # The image declares no PATH; without this, setup-go's GITHUB_PATH
+      # entry becomes the whole PATH and later steps cannot find sh.
+      env:
+        PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     steps:
       - run: dnf -y install git tar gzip make
       - uses: actions/checkout@v4
