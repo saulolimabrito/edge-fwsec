@@ -1,0 +1,109 @@
+policy_module(efw, 1.0.1)
+
+########################################
+# Declarations
+
+type efw_agent_t;
+type efw_agent_exec_t;
+init_daemon_domain(efw_agent_t, efw_agent_exec_t)
+# The unit sets NoNewPrivileges=yes; systemd may then only enter the domain
+# through an allowed nnp_transition (verified: denied without it).
+init_nnp_daemon_domain(efw_agent_t)
+
+type efw_web_t;
+type efw_web_exec_t;
+init_daemon_domain(efw_web_t, efw_web_exec_t)
+init_nnp_daemon_domain(efw_web_t)
+
+type efw_var_lib_t;
+files_type(efw_var_lib_t)
+
+type efw_web_var_lib_t;
+files_type(efw_web_var_lib_t)
+
+type efw_var_run_t;
+files_pid_file(efw_var_run_t)
+
+type efw_conf_t;
+files_config_file(efw_conf_t)
+
+########################################
+# efw-agent: owns nftables tables and NetworkManager profiles
+
+allow efw_agent_t self:capability { chown net_admin net_raw };
+allow efw_agent_t self:process { getsched signal };
+allow efw_agent_t self:fifo_file rw_fifo_file_perms;
+allow efw_agent_t self:unix_stream_socket { create_stream_socket_perms listen accept };
+allow efw_agent_t self:unix_dgram_socket create_socket_perms;
+allow efw_agent_t self:netlink_route_socket create_netlink_socket_perms;
+
+manage_dirs_pattern(efw_agent_t, efw_var_lib_t, efw_var_lib_t)
+manage_files_pattern(efw_agent_t, efw_var_lib_t, efw_var_lib_t)
+files_var_lib_filetrans(efw_agent_t, efw_var_lib_t, dir)
+
+manage_dirs_pattern(efw_agent_t, efw_var_run_t, efw_var_run_t)
+manage_sock_files_pattern(efw_agent_t, efw_var_run_t, efw_var_run_t)
+files_pid_filetrans(efw_agent_t, efw_var_run_t, { dir sock_file })
+
+read_files_pattern(efw_agent_t, efw_conf_t, efw_conf_t)
+
+# nft runs in the system's iptables_t domain and reads the ruleset from a pipe.
+iptables_domtrans(efw_agent_t)
+gen_require(`
+	type iptables_t;
+')
+allow iptables_t efw_agent_t:fifo_file rw_inherited_fifo_file_perms;
+allow iptables_t efw_agent_t:process sigchld;
+# NoNewPrivileges is inherited by nft: the transition must be allowed explicitly.
+allow efw_agent_t iptables_t:process2 nnp_transition;
+
+# sd_notify (Type=notify): the notify socket can carry kernel_t or init_t.
+kernel_dgram_send(efw_agent_t)
+init_dgram_send(efw_agent_t)
+kernel_read_net_sysctls(efw_agent_t)
+
+dbus_system_bus_client(efw_agent_t)
+networkmanager_dbus_chat(efw_agent_t)
+
+init_write_pid_socket(efw_agent_t)
+kernel_read_system_state(efw_agent_t)
+kernel_read_network_state(efw_agent_t)
+dev_read_sysfs(efw_agent_t)
+dev_read_urand(efw_agent_t)
+files_read_etc_files(efw_agent_t)
+auth_use_nsswitch(efw_agent_t)
+miscfiles_read_localization(efw_agent_t)
+corecmd_search_bin(efw_agent_t)
+
+########################################
+# efw-web: unprivileged HTTPS console
+
+allow efw_web_t self:capability net_bind_service;
+allow efw_web_t self:process { getsched signal };
+allow efw_web_t self:fifo_file rw_fifo_file_perms;
+allow efw_web_t self:tcp_socket { create_stream_socket_perms listen accept };
+allow efw_web_t self:udp_socket create_socket_perms;
+allow efw_web_t self:unix_stream_socket create_stream_socket_perms;
+allow efw_web_t self:netlink_route_socket r_netlink_socket_perms;
+
+corenet_tcp_bind_generic_node(efw_web_t)
+corenet_tcp_bind_http_port(efw_web_t)
+corenet_tcp_sendrecv_generic_if(efw_web_t)
+corenet_tcp_sendrecv_generic_node(efw_web_t)
+
+manage_dirs_pattern(efw_web_t, efw_web_var_lib_t, efw_web_var_lib_t)
+manage_files_pattern(efw_web_t, efw_web_var_lib_t, efw_web_var_lib_t)
+files_var_lib_filetrans(efw_web_t, efw_web_var_lib_t, dir)
+read_files_pattern(efw_web_t, efw_conf_t, efw_conf_t)
+
+# Talk to the agent, and nothing else privileged.
+stream_connect_pattern(efw_web_t, efw_var_run_t, efw_var_run_t, efw_agent_t)
+
+# Interface state: sysfs, /proc/net, uptime, os-release.
+kernel_read_system_state(efw_web_t)
+kernel_read_network_state(efw_web_t)
+dev_read_sysfs(efw_web_t)
+dev_read_urand(efw_web_t)
+files_read_etc_files(efw_web_t)
+auth_use_nsswitch(efw_web_t)
+miscfiles_read_localization(efw_web_t)

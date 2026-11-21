@@ -1,0 +1,6 @@
+/usr/bin/efw-agent	--	gen_context(system_u:object_r:efw_agent_exec_t,s0)
+/usr/bin/efw-web	--	gen_context(system_u:object_r:efw_web_exec_t,s0)
+/var/lib/efw(/.*)?		gen_context(system_u:object_r:efw_var_lib_t,s0)
+/var/lib/efw-web(/.*)?		gen_context(system_u:object_r:efw_web_var_lib_t,s0)
+/run/efw(/.*)?			gen_context(system_u:object_r:efw_var_run_t,s0)
+/etc/edge-fwsec(/.*)?		gen_context(system_u:object_r:efw_conf_t,s0)

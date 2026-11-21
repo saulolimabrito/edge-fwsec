@@ -6,6 +6,9 @@ GO        ?= go
 NPM       ?= npm
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 COMMIT    ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+# Full commit hash: seeds each binary's GNU build-id (deterministic, traceable).
+FULLCOMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo 0)
+SHA1      := $(shell command -v sha1sum >/dev/null 2>&1 && echo sha1sum || echo 'shasum -a 1')
 # Reproducible builds: the timestamp comes from the last commit, not the clock.
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || echo 0)
 DATE      := $(shell date -u -r $(SOURCE_DATE_EPOCH) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d @$(SOURCE_DATE_EPOCH) +%Y-%m-%dT%H:%M:%SZ)
@@ -16,7 +19,7 @@ CMDS      := efw-web efw-agent efwctl
 export SOURCE_DATE_EPOCH
 export CGO_ENABLED := 0
 
-.PHONY: all ui ui-deps build linux check test test-go test-race test-ui vet fmt-check repro clean run
+.PHONY: all ui ui-deps build linux check test test-go test-race test-ui vet fmt-check repro clean run rpm-src
 
 all: check build
 
@@ -38,8 +41,9 @@ build: ui
 # Appliance targets. The x86_64 baseline is x86-64-v3 (RHEL/Rocky 10 requirement).
 linux: ui
 	for c in $(CMDS); do \
-	  GOOS=linux GOARCH=amd64 GOAMD64=v3 $(GO) build $(GOFLAGS_R) -o dist/linux-x86_64/$$c ./cmd/$$c; \
-	  GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS_R) -o dist/linux-aarch64/$$c ./cmd/$$c; \
+	  bid=$$(printf '%s %s' "$(FULLCOMMIT)" "$$c" | $(SHA1) | cut -c1-40); \
+	  GOOS=linux GOARCH=amd64 GOAMD64=v3 $(GO) build -trimpath -buildvcs=false -ldflags "$(LDFLAGS) -B 0x$$bid" -o dist/linux-x86_64/$$c ./cmd/$$c; \
+	  GOOS=linux GOARCH=arm64 $(GO) build -trimpath -buildvcs=false -ldflags "$(LDFLAGS) -B 0x$$bid" -o dist/linux-aarch64/$$c ./cmd/$$c; \
 	done
 	cd dist && { command -v sha256sum >/dev/null && sha256sum linux-*/* || shasum -a 256 linux-*/*; } > SHA256SUMS
 	cat dist/SHA256SUMS
@@ -62,6 +66,22 @@ test-ui: ui/node_modules
 test: test-go test-ui
 
 check: fmt-check vet test
+
+# RPM source bundles: reproducible binaries of one architecture + packaging
+# files + docs. Version numbers come from RPM_VERSION / the commit.
+RPM_VERSION ?= 0.4.0
+RPM_RELEASE ?= 0.1.g$(COMMIT)
+rpm-src: linux
+	for a in x86_64 aarch64; do \
+	  d=dist/rpm/edge-fwsec-$(RPM_VERSION); rm -rf $$d; mkdir -p $$d/bin $$d/docs; \
+	  cp dist/linux-$$a/* $$d/bin/; cp -R packaging $$d/; cp README.md $$d/; \
+	  cp docs/architecture.md docs/threat-model.md docs/support-matrix.md $$d/docs/; \
+	  (cd dist && { command -v sha256sum >/dev/null && sha256sum linux-$$a/* || shasum -a 256 linux-$$a/*; }) > $$d/SHA256SUMS; \
+	  tar --format=ustar -C dist/rpm -czf dist/rpm/edge-fwsec-$(RPM_VERSION)-$$a.tar.gz edge-fwsec-$(RPM_VERSION); \
+	done
+	rm -rf dist/rpm/edge-fwsec-$(RPM_VERSION)
+	cp packaging/rpm/edge-fwsec.spec dist/rpm/
+	@echo "rpmbuild -ba --define 'efw_version $(RPM_VERSION)' --define 'efw_release $(RPM_RELEASE)' --define 'efw_commit $(COMMIT)'"
 
 # Build the Linux artefacts twice, from a fresh UI build each time, and compare.
 repro:

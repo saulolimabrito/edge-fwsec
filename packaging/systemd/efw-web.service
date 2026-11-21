@@ -1,0 +1,47 @@
+[Unit]
+Description=Edge FWSec web console
+Documentation=https://github.com/saulolimabrito/edge-fwsec/blob/main/docs/architecture.md
+Wants=efw-agent.service
+After=efw-agent.service network-online.target
+
+[Service]
+Type=simple
+User=efw-web
+Group=efw-web
+SupplementaryGroups=efw
+EnvironmentFile=-/etc/edge-fwsec/web.env
+ExecStart=/usr/bin/efw-web -listen [::]:443 -state-dir /var/lib/efw-web -agent-socket /run/efw/agent.sock -bootstrap-interfaces=${EFW_BOOTSTRAP_INTERFACES}
+Restart=on-failure
+RestartSec=2s
+UMask=0077
+
+StateDirectory=efw-web
+StateDirectoryMode=0700
+
+# Only binding to port 443 is allowed; no other privilege.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

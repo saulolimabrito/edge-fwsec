@@ -6,17 +6,16 @@ checked.
 
 ## ▶ Next concrete step
 
-Stage 4, first increment: systemd units (`efw-agent.service` before
-`network-online.target`, `efw-web.service` as a dedicated user with
-`AmbientCapabilities=CAP_NET_BIND_SERVICE`, both with `ProtectSystem=strict`,
-`NoNewPrivileges` and explicit `ReadWritePaths`), `/etc/sysctl.d` for
-forwarding, and an RPM spec that installs binaries, units, users and state
-directories. Before applying a policy on an installed VM, add SSH access on
-management interfaces to the model (schema 2, with a migration from schema 1
-and a test using the pinned schema-1 backup) so an installed appliance stays
-reachable for recovery. Then install the RPM on a fresh disposable Rocky 10
-VM (not `efw-dev`'s root namespace) and run the full flow through the UI,
-including a real reboot during a pending change.
+Stage 4, SELinux convergence on the clean VM `efw-inst` (Lima, Rocky 10.3
+aarch64), where edge-fwsec 0.4.0-0.2 is installed by `packaging/install.sh`.
+State left there: module `efw` loaded from a local build at priority 400
+(over the RPM's 200) and both domains PERMISSIVE (`semanage permissive -l`)
+to collect denials. Next: `ausearch -m avc -ts today | audit2allow` for
+`efw_agent_t`/`efw_web_t`, add the needed rules to `packaging/selinux/efw.te`,
+then `semanage permissive -d efw_agent_t efw_web_t`, `semodule -X 400 -r efw`,
+rebuild the RPM (release 0.3), upgrade with the installer and rerun
+`tests/install/e2e.sh phase1` enforcing with zero AVCs; then `phase2`, a
+real reboot (`limactl stop/start efw-inst`) and `reboot-check`.
 
 ## External items / blockers
 
@@ -172,7 +171,17 @@ hairpin NAT is out of scope for v1 (support matrix).
 
 ## Stage 4 — Distribution
 
-- [ ] Signed RPMs for x86_64 and aarch64 with declared dependencies
+- [x] RPMs for x86_64 and aarch64 built (`make rpm-src` + `rpmbuild` in `efw-dev`), signed with a
+  TEST key (release key pending), dependencies declared; deterministic GNU build-id per binary.
+- [x] Installer (`packaging/install.sh`): checks Rocky 10, architecture (x86-64-v3), signature
+  against only the given key, NetworkManager, SELinux, conflicting firewall services; refuses an
+  unsigned package; dry run changes nothing; upgrade 0.1 → 0.2 kept `/etc/edge-fwsec/web.env`.
+- [x] Installed-appliance end to end (`tests/install/e2e.sh phase1`, 2026-11-21, `efw-inst`,
+  SELinux domains permissive while collecting denials): 20/20 — bootstrap via API, NetworkManager +
+  nftables applied, confirm, masquerade, console unreachable from WAN/LAN, deadline rollback.
+  Defects found and fixed: `nnp_transition` needed for NoNewPrivileges units and for nft;
+  sd_notify socket labelled `kernel_t`; isolated rpm keyring needs `rpm_var_lib_t`.
+- [ ] Signed RPMs with the release key
 - [ ] SELinux module and hardened systemd units, validated in enforcing mode
 - [ ] Idempotent installer (checks Rocky 10, architecture, signature, conflicts)
 - [ ] Explicit and reversible firewalld transition

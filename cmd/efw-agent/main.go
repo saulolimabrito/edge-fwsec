@@ -76,6 +76,9 @@ func run(log *slog.Logger, stateDir, socket, group, nftBin, network string, minT
 		return fmt.Errorf("listen: %w", err)
 	}
 	log.Info("ready", "socket", socket, "state", stateDir, "version", version.Version, "confirmed", st.State().Confirmed)
+	if err := agent.NotifyReady(); err != nil {
+		log.Warn("sd_notify failed", "err", err)
+	}
 	err = a.Serve(ctx, ln)
 	a.Shutdown(context.Background())
 	return err
