@@ -28,16 +28,14 @@ uname -m
 cat /etc/rocky-release
 getenforce
 rpm -q firewalld nftables || true
-printf 'firewalld enabled: '
-systemctl is-enabled firewalld.service || true
+printf 'firewalld enabled: %s\n' "$(systemctl is-enabled firewalld.service || true)"
 if systemctl is-active --quiet firewalld.service; then
   for attempt in {1..15}; do
     timeout 2s firewall-cmd --quiet --state && break
     sleep 1
   done
 fi
-printf 'firewalld active: '
-systemctl is-active firewalld.service || true
+printf 'firewalld active: %s\n' "$(systemctl is-active firewalld.service || true)"
 echo 'EFW_MINIMAL_PROBE_DONE'
 systemctl poweroff --no-block
 PROBE

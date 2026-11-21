@@ -39,5 +39,10 @@ timeout 45m "${vm[@]}" -serial stdio -cdrom "$iso" \
     -append "console=ttyS0,115200n8 inst.stage2=hd:LABEL=$label inst.ks=file:/ks.cfg inst.noninteractive" \
     | tee install.log
 timeout 8m "${vm[@]}" -serial stdio | tee first-boot.log
-rg -x 'EFW_MINIMAL_UEFI=1\r?' first-boot.log
-rg -x 'EFW_MINIMAL_PROBE_DONE\r?' first-boot.log
+tr -d '\r' < first-boot.log > first-boot-normalized.log
+grep -Fx 'EFW_MINIMAL_UEFI=1' first-boot-normalized.log
+grep -Fx 'Enforcing' first-boot-normalized.log
+grep -Fx 'firewalld enabled: enabled' first-boot-normalized.log
+grep -Fx 'firewalld active: active' first-boot-normalized.log
+grep -E '^nftables-[0-9]' first-boot-normalized.log
+grep -Fx 'EFW_MINIMAL_PROBE_DONE' first-boot-normalized.log
