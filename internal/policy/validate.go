@@ -252,6 +252,8 @@ func (v *validator) routes() {
 			if _, ok := v.ifByName[r.Interface]; !ok {
 				v.add(p+".interface", "unknown interface %q", r.Interface)
 			}
+		} else if RouteInterface(v.c, r) == "" {
+			v.add(p+".interface", "gateway %s is not inside any static prefix; name the interface (required for DHCP/SLAAC links)", r.Gateway)
 		}
 		if r.Metric < 0 {
 			v.add(p+".metric", "metric must be >= 0")
@@ -589,4 +591,20 @@ func filterFamily(in []netip.Prefix, fam string) []netip.Prefix {
 		}
 	}
 	return out
+}
+
+// RouteInterface returns the logical interface that carries r: the one
+// named in the route, or the one whose static prefix contains the gateway.
+func RouteInterface(c *Config, r Route) string {
+	if r.Interface != "" {
+		return r.Interface
+	}
+	for _, it := range c.Interfaces {
+		for _, p := range append(append([]netip.Prefix{}, it.IPv4.Addresses...), it.IPv6.Addresses...) {
+			if p.Masked().Contains(r.Gateway) {
+				return it.Name
+			}
+		}
+	}
+	return ""
 }

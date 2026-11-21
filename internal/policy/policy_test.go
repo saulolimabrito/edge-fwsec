@@ -84,6 +84,10 @@ func TestValidationProblems(t *testing.T) {
 	expectProblem(t, "dhcp with addr", "interfaces[0].ipv4.addresses", "static mode", func(c *Config) { c.Interfaces[0].IPv4.Mode = "dhcp" })
 	expectProblem(t, "two wans", "interfaces", "one WAN", func(c *Config) { c.Interfaces[1].Role = RoleWAN })
 	expectProblem(t, "route family", "routes[1].gateway", "family", func(c *Config) { c.Routes[1].Gateway = c.Routes[0].Gateway })
+	expectProblem(t, "route off-link", "routes[0].interface", "not inside any static prefix", func(c *Config) {
+		c.Routes[0].Interface = ""
+		c.Routes[0].Gateway = mustAddr("198.51.100.1")
+	})
 	expectProblem(t, "host bits", "networks[0].prefixes[0]", "host bits", func(c *Config) {
 		c.Networks[0].Prefixes[0] = c.Interfaces[1].IPv4.Addresses[0]
 	})
