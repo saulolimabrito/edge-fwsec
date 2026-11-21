@@ -6,17 +6,15 @@ marcados.
 
 ## ▶ Próximo passo concreto
 
-Etapa 3, primeiro incremento: `internal/store` com revisões
-`draft/testing/confirmed` em `/var/lib/efw` (escrita atômica: temporário +
-`fsync` + `rename` + `fsync` do diretório; `state.json` com
-`confirmed`, `testing` e `deadline`; controle otimista por
-`base_revision`), testes de unidade incluindo falha no meio da escrita; em
-seguida o esqueleto do `cmd/efw-agent` com socket Unix e protocolo tipado
-(`Validate`, `Diff`, `Apply{revision, timeout}`, `Confirm`, `Rollback`,
-`Status`), aplicando nftables via `nft.Runner` com prazo controlado pelo
-agent e teste em namespace de timeout → rollback para a confirmada. Antes:
-confirmar na documentação do NetworkManager (D-Bus `CheckpointCreate`,
-`rollback_timeout`, flags) o comportamento no NM 1.58 do Rocky 10.
+Etapa 3, integração com NetworkManager: `internal/nm` gerando perfis
+`efw-<papel>-<device>` (ethernet/VLAN, IPv4/IPv6 estático, DHCP, SLAAC,
+rotas) a partir do modelo e aplicando com checkpoint (D-Bus
+`CheckpointCreate` com `rollback_timeout`, `CheckpointDestroy` ao
+confirmar, `CheckpointRollback` ao reverter), coordenado no agent com o
+nftables (rede primeiro na reversão). Testar na VM `efw-dev` com
+interfaces dummy/veth gerenciadas pelo NM, sem tocar a `eth0` da VM.
+Antes: confirmar na documentação do NetworkManager 1.58 a API de
+checkpoint e o comportamento de perfis para devices inexistentes.
 
 ## Pendências externas / bloqueios
 
@@ -107,10 +105,23 @@ tráfego; hairpin NAT fora da v1 (matriz de suporte).
 
 ## Etapa 3 — Operação completa
 
-- [ ] `efw-agent` + protocolo tipado no socket Unix, validação nos dois lados
-- [ ] Store de revisões (draft/testing/confirmed), escrita atômica, controle otimista
-- [ ] Aplicar com prazo, confirmar, reverter; checkpoint NetworkManager
-- [ ] Recuperação após reinício do serviço e reboot com mudança pendente
+- [x] `efw-agent` + protocolo tipado no socket Unix (0660, SO_PEERCRED),
+  decodificação estrita por operação; validação também no agent.
+  `go test ./internal/agent` (12 testes, incluindo socket real) + `make test-race`.
+- [x] Store de revisões (testing/confirmed, revisões imutáveis), escrita
+  atômica, flock de escritor único, controle otimista por `base_revision`.
+  `go test ./internal/store`.
+- [x] Aplicar com prazo, confirmar, reverter (nftables). VM `efw-dev`:
+  `tests/agent/lifecycle.sh` 38/38 em 3 execuções seguidas (2026-11-21).
+- [x] Mudança inválida recusada com o campo apontado e estado intacto.
+- [x] Perda de conectividade: regra que corta a LAN e mudança que move o
+  painel para fora da rede de gerenciamento são desfeitas pelo prazo; acesso
+  restaurado (testado com tráfego).
+- [x] `kill -9` durante teste → reinício recupera a confirmada; reboot
+  simulado (ruleset vazio) → agent reaplica a confirmada; `SIGTERM` durante
+  teste reverte; `efwctl recover` com o agent parado.
+- [ ] Checkpoint NetworkManager para interfaces/VLANs/rotas, coordenado com o firewall
+- [ ] Reboot real da VM durante mudança pendente (com unidade systemd; etapa 4)
 - [ ] HTTPS, bootstrap de uso único, login, sessões, CSRF, rate limit, certificado próprio
 - [ ] Painel restrito à rede de gerenciamento por padrão
 - [ ] Primeiro acesso: WAN, LAN, gerenciamento

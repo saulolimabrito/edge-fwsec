@@ -26,6 +26,8 @@ NetworkManager para interfaces/VLANs/rotas.
 | Validar / gerar / checar no kernel uma configuração | `efwctl policy validate\|render\|check <arquivo>` |
 | Atualizar a saída de ouro do gerador (revisar o diff!) | `go test ./internal/nft -update` |
 | Cenários de tráfego da política (VM descartável, root) | `EFW_TEST_VM=1 tests/policy/scenarios.sh <efwctl> internal/policy/testdata/edge.json tests/topology/netns.sh` |
+| Ciclo do agent: confirmar, prazo, kill -9, reboot, recover (VM, root) | `EFW_TEST_VM=1 tests/agent/lifecycle.sh dist/linux-aarch64 internal/policy/testdata/edge.json tests/topology/netns.sh tests/policy/httpd.py` |
+| Testes com race detector | `make test-race` |
 | VM de teste local (macOS, Lima) | `limactl start --name=efw-dev --mount-none template:rocky-10` |
 
 Testes Linux em macOS: compile o binário de teste com
@@ -38,7 +40,7 @@ nmcli na estação de desenvolvimento.
 ```
 cmd/efw-web     servidor web sem privilégios (console + API)
 cmd/efwctl      CLI local de diagnóstico e recuperação
-cmd/efw-agent   (etapa 3) serviço privilegiado que aplica mudanças
+cmd/efw-agent   serviço privilegiado: store de revisões, aplicar/confirmar/reverter, recuperação
 internal/       pacotes Go: sysinfo, web, version, policy (modelo+validação), nft (gerador+loader);
                 depois nm, store, auth
 ui/             console Svelte; `ui/dist` é gerado e embutido (só `.keep` é versionado)

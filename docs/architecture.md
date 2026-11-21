@@ -28,7 +28,7 @@ HA, BGP/OSPF, IDS/IPS, VPN, multi-WAN, plugins, NAT66/NPTv6.
 |---|---|---|---|
 | `efw-web` | etapa 1: leitura | nenhum | API, sessões, CSRF, UI embutida. Nunca altera o sistema. |
 | `efwctl` | etapa 1: leitura | root p/ recuperação | Diagnóstico; na etapa 3: listar revisões, reverter para a última confirmada, reemitir credencial de bootstrap. |
-| `efw-agent` | planejado | root, `CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW` + D-Bus | Valida, aplica, temporiza e reverte mudanças. Dono do prazo de confirmação. |
+| `efw-agent` | etapa 3: nftables, store, prazo e recuperação | root, `CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW` + D-Bus | Valida, aplica, temporiza e reverte mudanças. Dono do prazo de confirmação. |
 
 ### Leitura de estado (implementado)
 
@@ -133,7 +133,41 @@ intervalos sobrepostos). `Runner.Apply` executa `nft --check -f -` e depois
 Limites da v1: sem NAT66/NPTv6, sem hairpin NAT (cliente da LAN acessando o
 IP do WAN), sem regras de saída (`output` fica aberto).
 
-## Fluxo de mudança [planejado, etapa 3]
+## Store e agent (implementado: `internal/store`, `internal/agent`, `cmd/efw-agent`)
+
+Store em `/var/lib/efw` (0700): `lock` (flock exclusivo: um único
+escritor), `state.json` (`confirmed`, `testing{revision, deadline,
+author}`, `last_revision`), `revisions/<n>.json` (imutáveis, 0600),
+`history.jsonl` (auditoria, linha rasgada ignorada). Escrita atômica:
+temporário + `fsync` + `rename` + `fsync` do diretório. `state.json`
+corrompido é erro, nunca reset silencioso.
+
+Protocolo no socket (`/run/efw/agent.sock`, 0660 root:efw): um objeto JSON
+por conexão em cada sentido, máx. 1 MiB, decodificação estrita, cada
+operação aceita apenas os próprios campos.
+
+| op | campos | efeito |
+|---|---|---|
+| `status` | — | confirmada, em teste, segundos restantes |
+| `validate` | `config` | problemas com caminho |
+| `diff` | `config` | diff do ruleset contra a confirmada + ruleset novo |
+| `apply` | `config`, `base_revision`, `timeout_seconds`, `author`, `message` | grava revisão, marca teste, aplica, arma o prazo |
+| `confirm` | `revision`, `author` | torna confirmada; desarma o prazo |
+| `rollback` | `author` | abandona o teste e reaplica a confirmada |
+| `history` | `limit` | auditoria |
+| `get` | `revision` | configuração armazenada |
+
+O autor gravado é `<author> via uid=<uid>,pid=<pid>` (SO_PEERCRED). Prazo:
+30 s a 10 min (padrão 2 min). Sem revisão confirmada, "confirmada" significa
+remover as tabelas do projeto.
+
+Recuperação: na inicialização (antes de abrir o socket) qualquer teste
+pendente é abandonado e a confirmada é reaplicada — cobre crash, `kill -9`,
+reinício do serviço e reboot. `SIGTERM` durante teste reverte antes de
+sair. `efwctl recover` usa o agent se ele responder; com o agent parado,
+abre o store e reaplica a confirmada direto.
+
+## Fluxo de mudança [rede: planejado, etapa 3]
 
 1. **Validar** (web e agent): esquema, referências, sobreposição de
    prefixos, conflitos de NAT/port-forward, regra que corta o acesso de
