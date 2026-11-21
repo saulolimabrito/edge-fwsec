@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"io/fs"
 	"log/slog"
@@ -12,17 +13,31 @@ import (
 	"strings"
 	"time"
 
+	"github.com/saulolimabrito/edge-fwsec/internal/auth"
 	"github.com/saulolimabrito/edge-fwsec/internal/sysinfo"
+	"github.com/saulolimabrito/edge-fwsec/internal/tlsutil"
 	"github.com/saulolimabrito/edge-fwsec/internal/version"
 )
 
-// Server wires API handlers and the embedded UI.
+// Server wires API handlers and the embedded UI. Every API endpoint except
+// session discovery, login and bootstrap requires a session; mutations
+// also require the CSRF token.
 type Server struct {
-	UI     fs.FS
-	Reader sysinfo.Reader
-	EtcDir string
-	Log    *slog.Logger
-	Now    func() time.Time
+	UI       fs.FS
+	Reader   sysinfo.Reader
+	EtcDir   string
+	Log      *slog.Logger
+	Now      func() time.Time
+	Accounts *auth.Accounts
+	Sessions *auth.Sessions
+	Limiter  *auth.Limiter
+	Agent    AgentCaller
+	TLS      *tlsutil.Store // nil when TLS is not managed here (tests)
+	Access   interface{ Allowed(*http.Request) bool }
+}
+
+func contextWith(r *http.Request, ss *auth.Session) context.Context {
+	return context.WithValue(r.Context(), ctxKey{}, ss)
 }
 
 // Handler returns the root handler with security headers applied.
@@ -34,9 +49,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("GET /api/v1/version", s.handleVersion)
-	mux.HandleFunc("GET /api/v1/system", s.handleSystem)
-	mux.HandleFunc("GET /api/v1/interfaces", s.handleInterfaces)
+	s.registerAPI(mux)
 	// Unmatched /api/ paths (and wrong methods on known ones) must not fall
 	// through to the SPA; the API is read-only in stage 1.
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +60,19 @@ func (s *Server) Handler() http.Handler {
 		writeError(w, http.StatusNotFound, "not_found", "unknown API endpoint")
 	})
 	mux.Handle("/", s.spa())
-	return securityHeaders(mux)
+	return securityHeaders(s.restrict(mux))
+}
+
+// restrict enforces the management-network policy server side.
+func (s *Server) restrict(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.Access != nil && r.URL.Path != "/healthz" && !s.Access.Allowed(r) {
+			s.Log.Warn("refused request outside the management network", "remote", r.RemoteAddr, "path", r.URL.Path)
+			writeError(w, http.StatusForbidden, "not_management_network", "the console is only available on management interfaces")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
@@ -115,6 +140,9 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		if r.TLS != nil {
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			h.Set("Cache-Control", "no-store")
 		}
