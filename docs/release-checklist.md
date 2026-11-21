@@ -116,6 +116,13 @@ hairpin NAT is out of scope for v1 (support matrix).
 - [x] Apply with deadline, confirm, rollback (nftables). `efw-dev` VM:
   `tests/agent/lifecycle.sh` 38/38 in 3 consecutive runs (2026-11-21); CI
   run 44936826705 38/38 on x86_64 and arm64.
+  Follow-up (2026-11-21): run 44939988977 failed on both runners when the
+  agent tried to connect to NetworkManager. The topology configures its
+  interfaces and routes directly, so the lifecycle test now starts the
+  agent with `-network none`. `tests/agent/lifecycle.sh` passed 38/38 on
+  Rocky Linux 10.3 aarch64 with SELinux enforcing, real nftables traffic
+  and the system D-Bus socket unavailable inside the test environment.
+  NetworkManager checkpoints are covered by `tests/nm/checkpoint.sh`.
 - [x] Invalid change refused with the field named and state untouched.
 - [x] Connectivity loss: a rule that cuts the LAN and a change that moves the
   console off the management network are undone by the deadline; access

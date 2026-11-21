@@ -2,6 +2,8 @@
 # Apply / confirm / rollback lifecycle of efw-agent with real traffic.
 #
 # The agent runs inside the efw-fw namespace of the reference topology.
+# The topology configures its own interfaces and routes. NetworkManager
+# checkpoints are exercised separately by tests/nm/checkpoint.sh.
 # Scenarios: confirm, deadline expiry, loss of management access, invalid
 # change, kill -9 during a test, reboot (empty ruleset) recovery, shutdown
 # during a test, console recovery with the agent down, socket permissions.
@@ -28,7 +30,9 @@ export -f nsx ctl; export BIN W
 start_agent() {
   # Not through nsx: a backgrounded shell function gets a subshell PID, and
   # ip netns exec execs the agent so $! is the agent itself.
-  ip netns exec efw-fw "$BIN/efw-agent" -state-dir "$W/state" -socket "$EFW_SOCKET" -socket-group "" -min-timeout 2s >>"$W/agent.log" 2>&1 &
+  ip netns exec efw-fw "$BIN/efw-agent" -network none \
+    -state-dir "$W/state" -socket "$EFW_SOCKET" -socket-group "" \
+    -min-timeout 2s >>"$W/agent.log" 2>&1 &
   AGENT_PID=$!
   for _ in $(seq 50); do ctl status >/dev/null 2>&1 && return 0; sleep 0.1; done
   echo "agent did not start" >&2; tail -n 5 "$W/agent.log" >&2; return 1
