@@ -149,5 +149,41 @@ expect "apply fixed SNAT policy" nsx efw-fw nft -f "$W/snat.nft"
 expect_http "lan -> inet v4 works with fixed SNAT" efw-lan "http://198.51.100.10/?fixed-snat" 200
 expect "inet sees the fixed SNAT source 203.0.113.99" grep -Eq '^(::ffff:)?203\.0\.113\.99 .*"GET /\?fixed-snat HTTP/' "$W/inet80.log"
 
+echo "== DHCP client firewall rules"
+# The veth topology stays in place. The generated policy opens the two
+# client ports on WAN, and the UDP listener records what the firewall admits.
+python3 -I - "$CFG" "$W/dhcp.json" <<'PY' || exit 1
+import json
+import sys
+
+source, destination = sys.argv[1:]
+with open(source) as config:
+    policy = json.load(config)
+wan = next(interface for interface in policy["interfaces"] if interface["name"] == "wan")
+wan.update(ipv4={"mode": "dhcp"}, ipv6={"mode": "dhcp6"})
+policy["routes"] = [route for route in policy["routes"] if route.get("interface") != "wan"]
+with open(destination, "w") as config:
+    json.dump(policy, config)
+PY
+"$EFWCTL" policy render "$W/dhcp.json" > "$W/dhcp.nft" || exit 1
+expect "apply DHCP client policy" nsx efw-fw nft -f "$W/dhcp.nft"
+nsx efw-fw ip -6 address add fe80::2/64 dev wan0 nodad || exit 1
+nsx efw-wanr ip -6 address add fe80::1/64 dev up0 nodad || exit 1
+UDP_PROBE="$(dirname "$HTTPD")/udp_probe.py"
+nsx efw-fw python3 -I "$UDP_PROBE" receive "$W/dhcp.ready" >"$W/dhcp.received" &
+receiver=$!
+for _ in $(seq 30); do [[ -f "$W/dhcp.ready" ]] && break; sleep 0.1; done
+[[ -f "$W/dhcp.ready" ]] || { echo "DHCP listener failed to start" >&2; exit 2; }
+nsx efw-wanr python3 -I "$UDP_PROBE" send ipv4 203.0.113.1 1067 255.255.255.255 68 wrong-v4-port || exit 1
+nsx efw-lan python3 -I "$UDP_PROBE" send ipv4 192.168.10.10 67 255.255.255.255 68 wrong-v4-interface || exit 1
+nsx efw-wanr python3 -I "$UDP_PROBE" send ipv4 203.0.113.1 67 255.255.255.255 68 dhcp4-wan || exit 1
+nsx efw-wanr python3 -I "$UDP_PROBE" send ipv6 2001:db8:ffff::1 547 'fe80::2%up0' 546 wrong-v6-source || exit 1
+nsx efw-wanr python3 -I "$UDP_PROBE" send ipv6 'fe80::1%up0' 1547 'fe80::2%up0' 546 wrong-v6-port || exit 1
+nsx efw-wanr python3 -I "$UDP_PROBE" send ipv6 'fe80::1%up0' 547 'fe80::2%up0' 546 dhcp6-wan || exit 1
+wait "$receiver" || exit 1
+expect "WAN DHCP broadcast reaches the client port" grep -qx dhcp4-wan "$W/dhcp.received"
+expect "WAN link-local DHCPv6 reaches the client port" grep -qx dhcp6-wan "$W/dhcp.received"
+expect_not "DHCP packets from the wrong interface, source or port are blocked" grep -q '^wrong-' "$W/dhcp.received"
+
 echo "passed: $PASSES  failed: $FAILS"
 [[ $FAILS -eq 0 ]]

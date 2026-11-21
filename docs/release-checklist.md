@@ -103,8 +103,14 @@ server hung in `getfqdn()`.
   on 2026-11-21. The upstream HTTP server observed the configured secondary
   WAN address (203.0.113.99) and the LAN client received HTTP 200.
 
-Open: DHCP/DHCPv6 client rules still need traffic tests. Hairpin NAT is out
-of scope for v1 (support matrix).
+- [x] DHCP client firewall rules with real UDP traffic under the default
+  drop policy. On Rocky Linux 10.3 aarch64 with SELinux enforcing,
+  `tests/policy/scenarios.sh` passed 44/44 on 2026-11-21. A DHCPv4 broadcast
+  from WAN and a link-local DHCPv6 packet reached the client ports, while
+  packets using a different interface, source or server port were dropped.
+
+DHCP lease acquisition belongs to the installed-appliance tests. Hairpin
+NAT is out of scope for v1 (support matrix).
 
 ## Stage 3 — Full operation (in progress)
 
