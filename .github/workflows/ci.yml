@@ -37,6 +37,10 @@ jobs:
           sudo apt-get install -y -q nftables
           make build
           sudo EFW_TEST_VM=1 tests/policy/scenarios.sh dist/local/efwctl internal/policy/testdata/edge.json tests/topology/netns.sh
+      - name: agent lifecycle (disposable runner)
+        run: sudo EFW_TEST_VM=1 tests/agent/lifecycle.sh dist/local internal/policy/testdata/edge.json tests/topology/netns.sh tests/policy/httpd.py
+      - name: race detector
+        run: CGO_ENABLED=1 go test -race -count=2 ./internal/...
       - uses: actions/upload-artifact@v4
         if: matrix.runner == 'ubuntu-24.04'
         with:
