@@ -29,6 +29,14 @@ step() { say "==> $*"; }
 fail() { say "ERROR: $*"; exit 1; }
 run()  { if [[ $DRY == 1 ]]; then say "    (dry run) $*"; else say "    $*"; "$@" >>"$LOG" 2>&1; fi; }
 
+wait_for_firewalld() {
+  local deadline=$((SECONDS + 30))
+  until timeout 2s firewall-cmd --quiet --state >>"$LOG" 2>&1; do
+    (( SECONDS < deadline )) || return 1
+    sleep 1
+  done
+}
+
 while [[ $# -gt 0 ]]; do
   case $1 in
     --rpm) RPM_FILE=$2; shift 2 ;;
@@ -56,7 +64,12 @@ if [[ $RESTORE_FW == 1 ]]; then
   run systemctl disable --now efw-agent.service
   run systemctl unmask firewalld.service
   if [[ $(cat "$last/enabled" 2>/dev/null) == enabled ]]; then run systemctl enable firewalld.service; fi
-  if [[ $(cat "$last/active" 2>/dev/null) == active ]]; then run systemctl start firewalld.service; fi
+  if [[ $(cat "$last/active" 2>/dev/null) == active ]]; then
+    run systemctl start firewalld.service
+    if [[ $DRY != 1 ]]; then
+      wait_for_firewalld || fail "firewalld did not finish starting; Edge FWSec tables were kept"
+    fi
+  fi
   # A confirmed revision leaves its rules loaded on agent shutdown.
   # Release those tables once firewalld has recovered its prior state.
   run nft -f - <<'NFT'
