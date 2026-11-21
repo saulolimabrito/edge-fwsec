@@ -49,14 +49,23 @@ done
 mkdir -p "$(dirname "$LOG")"
 
 if [[ $RESTORE_FW == 1 ]]; then
-  last=$(ls -1d "$SNAPDIR"/firewalld-* 2>/dev/null | tail -n1)
-  [[ -n $last ]] || fail "no firewalld snapshot in $SNAPDIR"
+  snapshots=("$SNAPDIR"/firewalld-*)
+  last=${snapshots[-1]}
+  [[ -d $last ]] || fail "no firewalld snapshot in $SNAPDIR"
   step "Restoring firewalld from $last"
   run systemctl disable --now efw-agent.service
   run systemctl unmask firewalld.service
   if [[ $(cat "$last/enabled" 2>/dev/null) == enabled ]]; then run systemctl enable firewalld.service; fi
   if [[ $(cat "$last/active" 2>/dev/null) == active ]]; then run systemctl start firewalld.service; fi
-  say "firewalld restored; efw-agent is disabled. Edge FWSec tables were removed when the agent stopped only if no revision was confirmed."
+  # A confirmed revision leaves its rules loaded on agent shutdown.
+  # Release those tables once firewalld has recovered its prior state.
+  run nft -f - <<'NFT'
+destroy table inet efw_filter
+destroy table ip efw_nat
+NFT
+  if [[ $DRY != 1 ]]; then
+    say "firewalld restored and Edge FWSec tables removed. Saved revisions were preserved."
+  fi
   exit 0
 fi
 
