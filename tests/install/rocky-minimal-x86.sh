@@ -23,19 +23,21 @@ qemu-img create -f qcow2 disk.qcow2 16G
 cp /usr/share/OVMF/OVMF_VARS_4M.fd vars.fd
 
 accel=tcg
-if [[ -c /dev/kvm && -r /dev/kvm && -w /dev/kvm ]]; then
+qemu=(qemu-system-x86_64)
+if [[ -c /dev/kvm ]] && sudo python3 -c 'import fcntl, os; fd = os.open("/dev/kvm", os.O_RDWR); assert fcntl.ioctl(fd, 0xAE00) == 12'; then
     accel=kvm
+    qemu=(sudo qemu-system-x86_64)
 fi
 echo "Accelerator: $accel"
-vm=(qemu-system-x86_64 -machine "q35,accel=$accel" -cpu Haswell-v4
-    -m 4096 -smp 2 -nic none -display none -monitor none -no-reboot
+vm=("${qemu[@]}" -machine "q35,accel=$accel" -cpu Haswell-v4
+    -m 6144 -smp 4 -nic none -display none -monitor none -no-reboot
     -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd
     -drive if=pflash,format=raw,file=vars.fd
     -drive if=virtio,format=qcow2,file=disk.qcow2)
-timeout 22m "${vm[@]}" -serial stdio -cdrom "$iso" \
+timeout 45m "${vm[@]}" -serial stdio -cdrom "$iso" \
     -kernel vmlinuz -initrd initrd.img \
     -append "console=ttyS0,115200n8 inst.stage2=hd:LABEL=$label inst.ks=file:/ks.cfg inst.noninteractive" \
     | tee install.log
-timeout 5m "${vm[@]}" -serial stdio | tee first-boot.log
+timeout 8m "${vm[@]}" -serial stdio | tee first-boot.log
 rg -x 'EFW_MINIMAL_UEFI=1\r?' first-boot.log
 rg -x 'EFW_MINIMAL_PROBE_DONE\r?' first-boot.log
