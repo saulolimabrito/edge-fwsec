@@ -1,104 +1,112 @@
 # AGENTS.md — Edge FWSec
 
-Instruções para quem (pessoa ou agente) continuar este projeto. Leia também
-`docs/architecture.md`, `docs/threat-model.md` e `docs/release-checklist.md`;
-os quatro arquivos são a referência entre sessões. O próximo passo concreto
-está sempre no topo do checklist.
+Instructions for whoever (person or agent) continues this project. Also read
+`docs/architecture.md`, `docs/threat-model.md` and `docs/release-checklist.md`;
+these four files are the reference between sessions. The next concrete step
+is always at the top of the checklist.
 
-## O que é
+## What it is
 
-Appliance de firewall de borda single-node sobre Rocky Linux 10 (x86_64
-x86-64-v3 e aarch64). Backend Go, console Svelte 5 + TypeScript + Vite
-embutido no binário via `go:embed`. nftables para filtragem/NAT,
-NetworkManager para interfaces/VLANs/rotas.
+A single-node edge firewall appliance on Rocky Linux 10 (x86_64 with the
+x86-64-v3 baseline, and aarch64). Go backend; Svelte 5 + TypeScript + Vite
+console embedded in the binary with `go:embed`. nftables for filtering and
+NAT, NetworkManager for interfaces, VLANs and routes.
 
-## Comandos
+## Commands
 
-| Objetivo | Comando |
+| Goal | Command |
 |---|---|
-| Checagem completa (gofmt, vet, testes Go, svelte-check, vitest) | `make check` |
-| Build local (UI + binários do host) | `make build` |
-| Binários do appliance (linux x86_64 v3 + aarch64) e `dist/SHA256SUMS` | `make linux` |
-| Prova de build reproduzível (dois builds, compara hashes) | `make repro` |
-| Servidor local em 127.0.0.1:8080 | `make run` |
-| UI em modo dev com proxy para :8080 | `cd ui && npm run dev` |
-| Topologia de teste (só em VM descartável, como root) | `EFW_TEST_VM=1 tests/topology/netns.sh up\|verify\|down` |
-| Validar / gerar / checar no kernel uma configuração | `efwctl policy validate\|render\|check <arquivo>` |
-| Atualizar a saída de ouro do gerador (revisar o diff!) | `go test ./internal/nft -update` |
-| Cenários de tráfego da política (VM descartável, root) | `EFW_TEST_VM=1 tests/policy/scenarios.sh <efwctl> internal/policy/testdata/edge.json tests/topology/netns.sh` |
-| Ciclo do agent: confirmar, prazo, kill -9, reboot, recover (VM, root) | `EFW_TEST_VM=1 tests/agent/lifecycle.sh dist/linux-aarch64 internal/policy/testdata/edge.json tests/topology/netns.sh tests/policy/httpd.py` |
-| Testes com race detector | `make test-race` |
-| VM de teste local (macOS, Lima) | `limactl start --name=efw-dev --mount-none template:rocky-10` |
+| Full check (gofmt, vet, Go tests, svelte-check, vitest) | `make check` |
+| Go tests with the race detector | `make test-race` |
+| Local build (UI + host binaries) | `make build` |
+| Appliance binaries (linux x86_64 v3 + aarch64) and `dist/SHA256SUMS` | `make linux` |
+| Reproducible-build proof (two builds, hashes compared) | `make repro` |
+| Local console on 127.0.0.1:8080 | `make run` |
+| UI dev server proxying to :8080 | `cd ui && npm run dev` |
+| Validate / render / kernel-check a configuration | `efwctl policy validate\|render\|check <file>` |
+| Refresh the generator's golden output (review the diff!) | `go test ./internal/nft -update` |
+| Test topology (disposable VM only, as root) | `EFW_TEST_VM=1 tests/topology/netns.sh up\|verify\|down` |
+| Policy traffic scenarios (disposable VM, root) | `EFW_TEST_VM=1 tests/policy/scenarios.sh <efwctl> internal/policy/testdata/edge.json tests/topology/netns.sh` |
+| Agent lifecycle: confirm, deadline, kill -9, reboot, recover (VM, root) | `EFW_TEST_VM=1 tests/agent/lifecycle.sh dist/linux-aarch64 internal/policy/testdata/edge.json tests/topology/netns.sh tests/policy/httpd.py` |
+| NetworkManager checkpoints on a real NM (VM root namespace, root) | `EFW_TEST_VM=1 tests/nm/checkpoint.sh dist/linux-aarch64` |
+| Local test VM (macOS, Lima) | `limactl start --name=efw-dev --mount-none template:rocky-10` |
 
-Testes Linux em macOS: compile o binário de teste com
-`GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c ./internal/<pkg>`, copie
-com `limactl copy` e execute na VM `efw-dev`. Nunca rode `netns.sh`, nft ou
-nmcli na estação de desenvolvimento.
+Linux tests from macOS: build the test binary with
+`GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c ./internal/<pkg>`, copy it
+with `limactl copy` and run it in the `efw-dev` VM. Never run `netns.sh`,
+`nft` or `nmcli` on the development workstation.
 
 ## Layout
 
 ```
-cmd/efw-web     servidor web sem privilégios (console + API)
-cmd/efwctl      CLI local de diagnóstico e recuperação
-cmd/efw-agent   serviço privilegiado: store de revisões, aplicar/confirmar/reverter, recuperação
-internal/       pacotes Go: sysinfo, web, version, policy (modelo+validação), nft (gerador+loader);
-                depois nm, store, auth
-ui/             console Svelte; `ui/dist` é gerado e embutido (só `.keep` é versionado)
-tests/topology  topologia WAN/LAN/VLAN/MGMT em namespaces
-tests/policy    cenários de tráfego da política (36 checagens)
-docs/           arquitetura, ameaças, checklist, topologia, matriz de suporte
+cmd/efw-web     unprivileged web server (console + API)
+cmd/efw-agent   privileged service: revision store, apply/confirm/rollback, recovery
+cmd/efwctl      local diagnostics and recovery CLI
+internal/       Go packages: sysinfo, web, version, policy (model + validation),
+                nft (generator + loader), nm (NetworkManager profiles + checkpoints),
+                store (revisions), agent (state machine + socket protocol), textdiff
+ui/             Svelte console; `ui/dist` is generated and embedded (only `.keep` is tracked)
+tests/topology  WAN/LAN/VLAN/MGMT topology in network namespaces
+tests/policy    policy traffic scenarios (36 checks)
+tests/agent     agent lifecycle with real traffic (38 checks)
+tests/nm        NetworkManager checkpoint lifecycle (46 checks)
+docs/           architecture, threat model, checklist, topology, support matrix
 ```
 
-## Convenções
+## Conventions
 
-- Go: só biblioteca padrão até haver motivo documentado; `gofmt`; erros com
-  contexto; nada de `panic` em caminho de requisição.
-- Frontend: Svelte 5 runes, TypeScript estrito, sem CSS/JS inline (a CSP
-  bloqueia `style=`/scripts inline), sem fontes ou recursos externos (o
-  appliance opera offline). Tokens de cor em `ui/src/app.css`.
-- Valores não lidos do kernel são `null` na API e "—" na UI. Nunca exibir
-  zero ou métrica inventada.
-- Versões de dependências npm fixas (`--save-exact`) e `package-lock.json`
-  versionado. TypeScript fixado em 6.x: `svelte-check` 4.7 ainda exige
-  configuração dupla para TS 7.
-- Commits pequenos, em inglês, imperativos; cada etapa atualiza o checklist
-  com o que foi verificado e como.
-- Autoria única: `Saulo Brito <100214355+saulolimabrito@users.noreply.github.com>`.
-  Commits, merges, PRs e Issues não levam trailers `Co-Authored-By` nem
-  rodapés de ferramentas de geração.
-- Textos de documentação em português; código, identificadores e mensagens
-  da UI em inglês.
+- Go: standard library unless there is a documented reason. Current
+  exception: `github.com/godbus/dbus/v5` for the NetworkManager D-Bus API.
+  `gofmt`; errors carry context; no `panic` on request paths.
+- Frontend: Svelte 5 runes, strict TypeScript, no inline CSS/JS (the CSP
+  blocks `style=` attributes and inline scripts), no external fonts or
+  assets (the appliance works offline). Color tokens live in `ui/src/app.css`.
+- Values the kernel did not report are `null` in the API and "—" in the UI.
+  Never show zero or an invented metric.
+- npm dependencies pinned (`--save-exact`) and `package-lock.json` tracked.
+  TypeScript pinned to 6.x: `svelte-check` 4.7 still needs a dual setup for TS 7.
+- Small, imperative commits in English; each stage updates the checklist with
+  what was verified and how.
+- Single authorship: `Saulo Brito <100214355+saulolimabrito@users.noreply.github.com>`.
+  Commits, merges, PRs and issues carry no `Co-Authored-By` trailers or
+  generator-tool footers.
+- Language: all documentation (this file, README, `docs/`, issues, release
+  notes) is written in English (en-US). Code, identifiers and UI text are
+  English too.
 
-## Invariantes de segurança (não quebrar)
+## Security invariants (do not break)
 
-1. `efw-web` nunca executa comandos nem altera o sistema. Mudanças passam
-   por `efw-agent` via socket Unix (0660, grupo dedicado) com protocolo
-   tipado por operação; validação nos dois lados. Sem shell, sem comando
-   arbitrário, sem nftables em texto livre vindo da API.
-2. Sem TLS + autenticação, o servidor só escuta em loopback
-   (`checkLoopback` em `cmd/efw-web`). Não remover essa trava antes da
-   etapa 3 estar completa.
-3. O projeto só altera as tabelas nftables que possui (`inet efw_filter` e
-   `ip efw_nat`), por substituição atômica; nunca `flush ruleset`. Tabelas alheias são preservadas.
-4. Toda aplicação de mudança tem prazo controlado pelo serviço; sem
-   confirmação, volta para a última revisão confirmada — inclusive após
-   reinício do processo ou da máquina.
-5. SELinux permanece em enforcing. Nada de `setenforce 0` em scripts,
-   testes ou documentação.
-6. Testes que alteram rede, firewall, disco ou boot rodam apenas em VM
-   descartável ou namespaces próprios (`EFW_TEST_VM=1`). A rede, o firewall e
-   as credenciais da estação de desenvolvimento nunca são tocados.
-7. Segredos (hash de senha, chave TLS, chave de sessão) nunca entram em logs,
-   backups sem cifra ou respostas da API.
-8. Builds reproduzíveis: `-trimpath`, `-buildvcs=false`, `-buildid=`,
-   `SOURCE_DATE_EPOCH` do último commit, `CGO_ENABLED=0`. `make repro` deve
-   passar antes de qualquer release.
+1. `efw-web` never runs commands or changes the system. Changes go through
+   `efw-agent` over a Unix socket (0660, dedicated group) with a typed,
+   per-operation protocol, validated on both sides. No shell, no arbitrary
+   commands, no free-text nftables from the API.
+2. Without TLS and authentication the web server only listens on loopback
+   (`checkLoopback` in `cmd/efw-web`). Keep that guard until stage 3 is complete.
+3. The project only changes the nftables tables it owns (`inet efw_filter`
+   and `ip efw_nat`), by atomic replacement; never `flush ruleset`. Foreign
+   tables are preserved. NetworkManager profiles are owned only when the id
+   starts with `efw-` and the UUID is the derived v5 UUID; others are never
+   modified.
+4. Every change is applied with a deadline enforced by the service; without
+   confirmation it returns to the last confirmed revision — also after a
+   process or machine restart.
+5. SELinux stays enforcing. No `setenforce 0` in scripts, tests or docs.
+6. Tests that change network, firewall, disk or boot run only in a
+   disposable VM or their own namespaces (`EFW_TEST_VM=1`). The development
+   workstation's network, firewall and credentials are never touched.
+7. Secrets (password hashes, TLS key, session key) never reach logs,
+   unencrypted backups or API responses.
+8. Reproducible builds: `-trimpath`, `-buildvcs=false`, `-buildid=`,
+   `SOURCE_DATE_EPOCH` from the last commit, `CGO_ENABLED=0`. `make repro`
+   must pass before any release.
 
-## Ambiente verificado
+## Verified environment
 
-- Desenvolvimento: macOS arm64, Go 1.27.4, Node 26, npm.
-- VM de teste: Lima `efw-dev`, Rocky Linux 10.3 aarch64 (imagem GenericCloud,
-  não Minimal), kernel 6.12.0-264, NetworkManager 1.58, SELinux enforcing,
-  sem nftables e sem firewalld instalados por padrão nessa imagem
-  (nftables 1.1.5 instalado depois via `dnf` para os testes).
-- A VM `rocky10-kea` pertence a outro projeto: não usar nem alterar.
+- Development: macOS arm64, Go 1.27.4, Node 26, npm.
+- Test VM: Lima `efw-dev`, Rocky Linux 10.3 aarch64 (GenericCloud image, not
+  Minimal), kernel 6.12.0-264, NetworkManager 1.58.0, SELinux enforcing. The
+  image ships without nftables and firewalld; nftables 1.1.5 was installed
+  with `dnf` for the tests.
+- Rocky's udev rules leave veth devices unmanaged by NetworkManager unless
+  they are named `eth<digit>…`; `tests/nm` relies on that.
+- The `rocky10-kea` VM belongs to another project: do not use or modify it.

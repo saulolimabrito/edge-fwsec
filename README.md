@@ -1,15 +1,17 @@
 # Edge FWSec
 
-Appliance de firewall de borda para Rocky Linux 10 (x86_64 x86-64-v3 e
-aarch64): firewall stateful com nftables, roteamento, VLAN e NAT via
-NetworkManager, administrado por uma console web própria.
+An edge firewall appliance for Rocky Linux 10 (x86_64 with x86-64-v3, and
+aarch64): stateful firewall with nftables, routing, VLANs and NAT through
+NetworkManager, managed from its own web console.
 
-**Estado:** etapa 1 de 5 — console somente leitura com dados reais de
-interfaces. Ainda não aplica políticas. Não use em produção.
+**Status:** stage 3 of 5 in progress. The policy engine and the privileged
+agent work (apply with a confirmation deadline, automatic rollback,
+NetworkManager checkpoints, console recovery); the web console is still
+read-only and there are no packages yet. Not for production use.
 
-## Rodar localmente
+## Run locally
 
-Requer Go ≥ 1.25 e Node.js ≥ 22.
+Requires Go ≥ 1.25 and Node.js ≥ 22.
 
 ```bash
 make check
@@ -19,20 +21,20 @@ make check
 make run
 ```
 
-Abra http://127.0.0.1:8080. Sem TLS e autenticação o servidor recusa
-endereços que não sejam loopback.
+Open http://127.0.0.1:8080. Without TLS and authentication the server refuses
+any address other than loopback.
 
-Binários do appliance (estáticos, reproduzíveis):
+Appliance binaries (static, reproducible):
 
 ```bash
 make linux
 ```
 
-## Documentação
+## Documentation
 
-- [AGENTS.md](AGENTS.md) — comandos, convenções e invariantes de segurança
+- [AGENTS.md](AGENTS.md) — commands, conventions and security invariants
 - [docs/architecture.md](docs/architecture.md)
 - [docs/threat-model.md](docs/threat-model.md)
-- [docs/release-checklist.md](docs/release-checklist.md) — progresso e próximo passo
+- [docs/release-checklist.md](docs/release-checklist.md) — progress and next step
 - [docs/test-topology.md](docs/test-topology.md)
 - [docs/support-matrix.md](docs/support-matrix.md)

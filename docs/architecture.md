@@ -1,107 +1,95 @@
-# Arquitetura — Edge FWSec v1
+# Architecture — Edge FWSec v1
 
-Status: etapas 1 (leitura) e 2 (motor de políticas) implementadas. Seções marcadas **[planejado]** são o
-contrato para as etapas seguintes; mudanças nelas exigem atualizar este
-arquivo e o modelo de ameaças.
+Status: stages 1 (read-only console), 2 (policy engine) and the agent part of
+stage 3 (revisions, apply/confirm/rollback, NetworkManager checkpoints) are
+implemented. Sections marked **[planned]** are the contract for the next
+stages; changing them requires updating this file and the threat model.
 
-## Escopo da v1
+## v1 scope
 
-Appliance single-node: firewall stateful, roteamento estático, NAT IPv4,
-VLAN 802.1Q, administração web e CLI de recuperação. Fora da v1 (roadmap):
-HA, BGP/OSPF, IDS/IPS, VPN, multi-WAN, plugins, NAT66/NPTv6.
+Single-node appliance: stateful firewall, static routing, IPv4 NAT, 802.1Q
+VLANs, web administration and a recovery CLI. Out of scope for v1
+(roadmap): HA, BGP/OSPF, IDS/IPS, VPN, multi-WAN, plugins, NAT66/NPTv6.
 
-## Processos
+## Processes
 
 ```
- navegador ──HTTPS──▶ efw-web (usuário efw-web, sem privilégios)
-                         │  API JSON /api/v1, console embutido (go:embed)
-                         │  socket Unix /run/efw/agent.sock (0660 root:efw-agent-clients)
-                         ▼  protocolo tipado, uma operação por mensagem   [planejado]
-                      efw-agent (root com capabilities restritas)
-                         ├─ store de revisões  /var/lib/efw/
-                         ├─ nftables (script gerado → `nft --check -f -` → `nft -f -`, stdin, sem shell)
-                         └─ NetworkManager (D-Bus: Settings, Checkpoint*)
- console local ──▶ efwctl (lê o store diretamente; root)
+ browser ──HTTPS──▶ efw-web (user efw-web, unprivileged)
+                       │  JSON API /api/v1, embedded console (go:embed)
+                       │  Unix socket /run/efw/agent.sock (0660 root:efw)
+                       ▼  typed protocol, one operation per message
+                    efw-agent (root with restricted capabilities)
+                       ├─ revision store  /var/lib/efw/
+                       ├─ nftables (generated script → `nft --check -f -` → `nft -f -`, stdin, no shell)
+                       └─ NetworkManager (D-Bus: Settings, Checkpoint*)
+ local console ──▶ efwctl (talks to the agent; reads the store directly when the agent is down; root)
 ```
 
-| Componente | Estado | Privilégio | Responsabilidade |
+| Component | State | Privilege | Responsibility |
 |---|---|---|---|
-| `efw-web` | etapa 1: leitura | nenhum | API, sessões, CSRF, UI embutida. Nunca altera o sistema. |
-| `efwctl` | etapa 1: leitura | root p/ recuperação | Diagnóstico; na etapa 3: listar revisões, reverter para a última confirmada, reemitir credencial de bootstrap. |
-| `efw-agent` | etapa 3: nftables, store, prazo e recuperação | root, `CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW` + D-Bus | Valida, aplica, temporiza e reverte mudanças. Dono do prazo de confirmação. |
+| `efw-web` | read-only API | none | API, sessions, CSRF, embedded UI. Never changes the system. |
+| `efw-agent` | implemented (nftables, NetworkManager, store, deadline, recovery) | root, `CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW` + D-Bus | Validates, applies, times and rolls back changes. Owns the confirmation deadline. |
+| `efwctl` | implemented | root for recovery | Diagnostics, apply/confirm/rollback from the console, `recover` with the agent down. Planned: reissue the bootstrap credential. |
 
-### Leitura de estado (implementado)
+### Reading state (implemented)
 
-`internal/sysinfo` lê `net.Interfaces`, `/sys/class/net/*/statistics`,
-`operstate`, `uevent`, e rtnetlink `RTM_GETLINK` (`IFLA_LINKINFO`) para tipo
-de link e VLAN ID. `/proc/net/vlan/*` é `0600 root` no Rocky 10 e por isso
-não é usado no processo sem privilégios (verificado na VM). Valores ausentes
-são `null`.
+`internal/sysinfo` reads `net.Interfaces`, `/sys/class/net/*/statistics`,
+`operstate`, `uevent`, and rtnetlink `RTM_GETLINK` (`IFLA_LINKINFO`) for the
+link kind and VLAN ID. `/proc/net/vlan/*` is `0600 root` on Rocky 10, so the
+unprivileged process does not use it (verified in the VM). Missing values
+are `null`.
 
-### API (implementado)
+### Web API (implemented, read-only)
 
-| Método | Caminho | Resposta |
+| Method | Path | Response |
 |---|---|---|
 | GET | `/healthz` | `{"status":"ok"}` |
-| GET | `/api/v1/version` | versão, commit, data do build |
-| GET | `/api/v1/system` | hostname, os-release, kernel, arquitetura, uptime |
-| GET | `/api/v1/interfaces` | interfaces, endereços IPv4/IPv6, contadores, `observed_at` |
+| GET | `/api/v1/version` | version, commit, build date |
+| GET | `/api/v1/system` | hostname, os-release, kernel, architecture, uptime |
+| GET | `/api/v1/interfaces` | interfaces, IPv4/IPv6 addresses, counters, `observed_at` |
 
-Qualquer outro método em `/api/` → 405; caminho desconhecido → 404 JSON.
-Cabeçalhos: CSP `default-src 'self'` sem inline, `X-Frame-Options: DENY`,
-`nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` na API.
+Any other method under `/api/` → 405; unknown path → JSON 404. Headers:
+CSP `default-src 'self'` without inline, `X-Frame-Options: DENY`,
+`nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` on the API.
 
-## Modelo de configuração (implementado: `internal/policy`)
+## Configuration model (implemented: `internal/policy`)
 
-Documento único com `schema_version: 1`, lido com `Decode` estrito (campo
-desconhecido ou dado extra = erro) e gravado com `Canonical` (JSON
-determinístico). Exemplo completo: `internal/policy/testdata/edge.json`.
+One document with `schema_version: 1`, read with a strict `Decode` (unknown
+field or trailing data = error) and written with `Canonical` (deterministic
+JSON). Full example: `internal/policy/testdata/edge.json`.
 
-| Seção | Conteúdo |
+| Section | Content |
 |---|---|
-| `interfaces[]` | nome lógico, papel `wan/lan/mgmt/opt`, device do kernel, `vlan {parent,id}`, `ipv4 {mode: none/static/dhcp}`, `ipv6 {mode: none/static/slaac/dhcp6}` |
-| `routes[]` | destino, gateway (mesma família), interface lógica, métrica |
-| `networks[]` | objeto de rede com prefixos IPv4 e/ou IPv6 |
-| `services[]` | objeto de serviço: entradas `tcp/udp` (faixas de portas) ou `icmp/icmpv6` |
-| `admin` | porta HTTPS, interfaces lógicas autorizadas (nunca WAN), origens opcionais |
-| `firewall` | `default_input` (drop/reject), `default_forward` (drop/reject/accept), `log_default`, `rules[]` ordenadas |
-| `nat` | `source[]` (masquerade/snat, só IPv4), `port_forwards[]` (DNAT IPv4) |
+| `interfaces[]` | logical name, role `wan/lan/mgmt/opt`, kernel device, `vlan {parent,id}`, `ipv4 {mode: none/static/dhcp}`, `ipv6 {mode: none/static/slaac/dhcp6}` |
+| `routes[]` | destination, gateway (same family), logical interface, metric |
+| `networks[]` | network object with IPv4 and/or IPv6 prefixes |
+| `services[]` | service object: `tcp/udp` entries (port ranges) or `icmp/icmpv6` |
+| `admin` | HTTPS port, authorized logical interfaces (never the WAN), optional sources |
+| `firewall` | `default_input` (drop/reject), `default_forward` (drop/reject/accept), `log_default`, ordered `rules[]` |
+| `nat` | `source[]` (masquerade/snat, IPv4 only), `port_forwards[]` (IPv4 DNAT) |
 
-Regras: `id`, `direction` (input/forward), `in`, `out`, `family`
-(any/ipv4/ipv6), `source`/`destination` (nomes de objeto ou literais),
-`service`, `action` (accept/drop/reject), `log`, `disabled`. A posição na
-lista é a ordem de avaliação dentro da direção.
+Rules: `id`, `direction` (input/forward), `in`, `out`, `family`
+(any/ipv4/ipv6), `source`/`destination` (object names or literals),
+`service`, `action` (accept/drop/reject), `log`, `disabled`. The position in
+the list is the evaluation order within the direction.
 
-Validação (`Validate`) devolve todos os problemas com caminho
-(`firewall.rules[2].source[0]`). Principais checagens: identificadores
-`^[a-z][a-z0-9_-]{0,31}$` e devices compatíveis com IFNAMSIZ (nada que
-precise de escape no nftables); VID 1–4094; família de endereços;
-sobreposição de prefixos entre interfaces; um único WAN; gateway na mesma
-família; objetos sem bits de host; faixas de porta; referências existentes;
-regra cuja combinação de origem/destino/serviço/família nunca casa;
-`default_input: accept` recusado; gerenciamento sem interface ou no WAN
-recusado; NAT só IPv4; conflitos de port forward (mesma interface,
-protocolo, endereço e portas sobrepostas); port forward que sombreia a
-porta do painel; remapeamento de faixa para porta única recusado.
+Validation (`Validate`) returns every problem with a path
+(`firewall.rules[2].source[0]`). Main checks: identifiers
+`^[a-z][a-z0-9_-]{0,31}$` and devices compatible with IFNAMSIZ (nothing that
+needs escaping in nftables); VID 1–4094; address families; overlapping
+prefixes between interfaces; a single WAN; gateway in the same family and
+either on-link with a static prefix or bound to a named interface; objects
+without host bits; port ranges; existing references; a rule whose
+source/destination/service/family combination can never match;
+`default_input: accept` refused; management access with no interface or on
+the WAN refused; NAT IPv4 only; port-forward conflicts (same interface,
+protocol, address and overlapping ports); a port forward that shadows the
+console port; remapping a port range onto a single port refused.
 
-### Revisões
+## nftables generation (implemented: `internal/nft`)
 
-| Estado | Significado |
-|---|---|
-| `draft` | edição pendente de um usuário; baseada na revisão N (`base_revision`) |
-| `testing` | revisão aplicada aguardando confirmação, com `deadline` |
-| `confirmed` | última revisão confirmada; sobrevive a reboot |
-| `rejected` / `rolled_back` | histórico, com motivo |
-
-Store em `/var/lib/efw/revisions/<n>.json` + `state.json` atualizado por
-escrita atômica (arquivo temporário + `fsync` + `rename` + `fsync` do
-diretório). Concorrência: confirmar um draft exige `base_revision ==
-confirmed` (controle otimista); conflito → 409 com diff.
-
-## Geração nftables (implementado: `internal/nft`)
-
-`Render` revalida e gera um script com o idioma de substituição atômica,
-verificado no nftables 1.1.5 do Rocky 10.3:
+`Render` revalidates and generates a script using the atomic replacement
+idiom, verified on nftables 1.1.5 (Rocky 10.3):
 
 ```
 table inet efw_filter
@@ -112,108 +100,120 @@ table inet efw_filter { ... }
 table ip efw_nat { ... }
 ```
 
-Ordem das cadeias:
+Chain order:
 
-- `input` (policy drop): `ct state` vmap → `lo` → ICMPv6 essencial → DHCP/DHCPv6 cliente nas
-  interfaces que usam → acesso ao painel nas interfaces de gerenciamento → regras do usuário →
-  log padrão (limitado a 10/s) → `reject` se a política for reject.
-- `forward` (policy drop ou accept): `ct state` → erros ICMPv6 → aceites implícitos dos port
-  forwards (`ct status dnat`, avaliados antes das regras do usuário) → regras do usuário → log
-  padrão → reject.
-- `ip efw_nat`: `prerouting` com DNAT e `postrouting` com masquerade/SNAT.
+- `input` (policy drop): `ct state` vmap → `lo` → essential ICMPv6 →
+  DHCP/DHCPv6 client on interfaces that use it → console access on the
+  management interfaces → user rules → default log (limited to 10/s) →
+  `reject` when the policy is reject.
+- `forward` (policy drop or accept): `ct state` → ICMPv6 errors → implicit
+  port-forward accepts (`ct status dnat`, evaluated before user rules) → user
+  rules → default log → reject.
+- `ip efw_nat`: `prerouting` with DNAT and `postrouting` with masquerade/SNAT.
 
-ICMPv6 segue a RFC 4890: erros (incluindo Packet Too Big) sempre; ND só com
-hop limit 255; MLD só de link-local; redirect não é aceito. Regras usam
-`iifname`/`oifname` (o `iif` exige a interface existente no carregamento).
-Conjuntos de prefixos e portas são normalizados (o nftables recusa
-intervalos sobrepostos). `Runner.Apply` executa `nft --check -f -` e depois
-`nft -f -` via `exec`, sem shell. Saída de referência:
-`internal/nft/testdata/edge.nft` (teste de ouro).
+ICMPv6 follows RFC 4890: errors (including Packet Too Big) always; ND only
+with hop limit 255; MLD only from link-local; redirects are not accepted.
+Rules use `iifname`/`oifname` (`iif` needs the interface to exist at load
+time). Prefix and port sets are normalized (nftables refuses overlapping
+intervals). `Runner.Apply` runs `nft --check -f -` and then `nft -f -` via
+`exec`, without a shell. Reference output: `internal/nft/testdata/edge.nft`
+(golden test).
 
-Limites da v1: sem NAT66/NPTv6, sem hairpin NAT (cliente da LAN acessando o
-IP do WAN), sem regras de saída (`output` fica aberto).
+v1 limits: no NAT66/NPTv6, no hairpin NAT (LAN client reaching the WAN
+address), no output filtering (`output` stays open).
 
-## Store e agent (implementado: `internal/store`, `internal/agent`, `cmd/efw-agent`)
+## NetworkManager profiles (implemented: `internal/nm`)
 
-Store em `/var/lib/efw` (0700): `lock` (flock exclusivo: um único
-escritor), `state.json` (`confirmed`, `testing{revision, deadline,
-author}`, `last_revision`), `revisions/<n>.json` (imutáveis, 0600),
-`history.jsonl` (auditoria, linha rasgada ignorada). Escrita atômica:
-temporário + `fsync` + `rename` + `fsync` do diretório. `state.json`
-corrompido é erro, nunca reset silencioso.
+One profile per interface: id `efw-<logical name>`, UUID v5 derived from the
+id (ownership = prefix + derived UUID), type `802-3-ethernet` or `vlan`
+(`vlan.parent`, `vlan.id`), `interface-name` = device, `ipv4`/`ipv6` method
+(`manual`, `auto` for DHCP/SLAAC, `dhcp` for DHCPv6, `disabled`),
+`address-data`, `route-data`, and the default route as `gateway`. Dynamic
+non-WAN links get `never-default`. Profiles are persisted to disk
+(`AddConnection2`/`Update2` with `TO_DISK`); stale owned profiles are deleted;
+foreign profiles are never touched.
 
-Protocolo no socket (`/run/efw/agent.sock`, 0660 root:efw): um objeto JSON
-por conexão em cada sentido, máx. 1 MiB, decodificação estrita, cada
-operação aceita apenas os próprios campos.
+Checkpoints (`CheckpointCreate`, flags `DELETE_NEW_CONNECTIONS`) cover the
+devices of the new profiles, their VLAN parents and the devices of existing
+owned profiles — never an empty list, which would mean every device on the
+host. NetworkManager's own `rollback_timeout` is the agent deadline + 30 s as
+a second safety net. Verified on NM 1.58.0: `DISCONNECT_NEW_DEVICES` is
+rejected with an explicit device list; checkpoints do not survive a
+NetworkManager restart (the agent then rewrites the confirmed profiles).
 
-| op | campos | efeito |
+## Store and agent (implemented: `internal/store`, `internal/agent`, `cmd/efw-agent`)
+
+Store in `/var/lib/efw` (0700): `lock` (exclusive flock: single writer),
+`state.json` (`confirmed`, `testing{revision, deadline, author,
+checkpoint}`, `last_revision`), `revisions/<n>.json` (immutable, 0600),
+`history.jsonl` (audit log; a torn last line is ignored). Atomic writes:
+temp file + `fsync` + `rename` + directory `fsync`. A corrupt `state.json` is
+an error, never a silent reset.
+
+Socket protocol (`/run/efw/agent.sock`, 0660 root:efw): one JSON object per
+connection in each direction, 1 MiB max, strict decoding, each operation
+accepts only its own fields.
+
+| op | fields | effect |
 |---|---|---|
-| `status` | — | confirmada, em teste, segundos restantes |
-| `validate` | `config` | problemas com caminho |
-| `diff` | `config` | diff do ruleset contra a confirmada + ruleset novo |
-| `apply` | `config`, `base_revision`, `timeout_seconds`, `author`, `message` | grava revisão, marca teste, aplica, arma o prazo |
-| `confirm` | `revision`, `author` | torna confirmada; desarma o prazo |
-| `rollback` | `author` | abandona o teste e reaplica a confirmada |
-| `history` | `limit` | auditoria |
-| `get` | `revision` | configuração armazenada |
+| `status` | — | confirmed revision, revision under test, seconds left |
+| `validate` | `config` | problems with paths |
+| `diff` | `config` | ruleset diff against the confirmed revision + new ruleset |
+| `apply` | `config`, `base_revision`, `timeout_seconds`, `author`, `message` | store revision, mark testing, apply network + firewall, arm the deadline |
+| `confirm` | `revision`, `author` | release the checkpoint, mark confirmed, disarm |
+| `rollback` | `author` | abandon the test; restore network, then the confirmed ruleset |
+| `history` | `limit` | audit log |
+| `get` | `revision` | stored configuration |
 
-O autor gravado é `<author> via uid=<uid>,pid=<pid>` (SO_PEERCRED). Prazo:
-30 s a 10 min (padrão 2 min). Sem revisão confirmada, "confirmada" significa
-remover as tabelas do projeto.
+The recorded author is `<author> via uid=<uid>,pid=<pid>` (SO_PEERCRED).
+Deadline: 30 s to 10 min (default 2 min). With no confirmed revision,
+"confirmed" means removing the project's tables and profiles.
 
-Recuperação: na inicialização (antes de abrir o socket) qualquer teste
-pendente é abandonado e a confirmada é reaplicada — cobre crash, `kill -9`,
-reinício do serviço e reboot. `SIGTERM` durante teste reverte antes de
-sair. `efwctl recover` usa o agent se ele responder; com o agent parado,
-abre o store e reaplica a confirmada direto.
+## Change flow (implemented in the agent; UI planned)
 
-## Fluxo de mudança [rede: planejado, etapa 3]
+1. **Validate** (web and agent): schema, references, prefix overlap,
+   NAT/port-forward conflicts.
+2. **Diff**: generated ruleset against the confirmed revision (model-level
+   diff for the UI is planned).
+3. **Apply with deadline**: the agent persists `testing` + `deadline`
+   **before** touching the system; network profiles are applied under a
+   checkpoint (recorded in the test state); then the ruleset is checked with
+   `nft --check` and loaded in one transaction.
+4. **Confirm**: `CheckpointDestroy`, then `confirmed`. If the checkpoint
+   cannot be released the change is rolled back and confirmation refused.
+5. **Roll back** (deadline, explicit request or failure): network first
+   (`CheckpointRollback`, or rewrite the confirmed profiles if the checkpoint
+   is gone), then the confirmed ruleset.
+6. **Recovery**: at startup, before the socket opens, any pending test is
+   abandoned (checkpoint rolled back) and the confirmed ruleset is applied —
+   covers crash, `kill -9`, service restart and reboot. `SIGTERM` during a
+   test rolls back before exiting. `efwctl recover` uses the agent when it
+   answers; otherwise it opens the store and reapplies the confirmed ruleset.
 
-1. **Validar** (web e agent): esquema, referências, sobreposição de
-   prefixos, conflitos de NAT/port-forward, regra que corta o acesso de
-   gerenciamento atual.
-2. **Diff**: modelo (semântico) e ruleset nftables gerado.
-3. **Aplicar com prazo** (padrão 120 s, máx. 600 s):
-   - nftables: o lote completo das tabelas do projeto passa por
-     `nft --check` e depois é aplicado em uma transação única
-     (`delete table` + `add table` no mesmo arquivo carregado com `nft -f`),
-     que é atômica no kernel.
-   - rede: `CheckpointCreate` do NetworkManager com `rollback_timeout` = prazo
-     + margem, sobre os dispositivos afetados; depois ativação dos perfis.
-   - o agent grava `testing` + `deadline` no store **antes** de aplicar.
-4. **Confirmar**: o agent chama `CheckpointDestroy`, marca `confirmed`.
-5. **Reverter** (expiração, pedido explícito ou falha): reaplica o ruleset
-   da última confirmada e `CheckpointRollback`; ordem: rede primeiro, depois
-   firewall, para não deixar regras referenciando interfaces inexistentes.
-6. **Recuperação no boot**: `efw-agent` inicia antes de `network-online`;
-   se encontrar `testing`, descarta-a e aplica a confirmada. Checkpoints do
-   NM não sobrevivem a reinício do NM, por isso os perfis do projeto são
-   regravados a partir da revisão confirmada.
+A change that alters the management IP, VLAN or route **[planned UI]**: the
+UI shows the new address, the deadline and how to reconnect and confirm from
+it; the agent accepts confirmation from any network authorized by the
+revision under test.
 
-Mudança que altera IP/VLAN/rota de gerenciamento: a UI mostra o novo
-endereço, o prazo e a instrução de reconectar e confirmar por ele; o agent
-aceita a confirmação vinda de qualquer rede autorizada pela revisão em teste.
+## Ownership of system resources
 
-## Propriedade de recursos do sistema
+- nftables: tables `inet efw_filter` and `ip efw_nat` (reserved names). The
+  agent never runs `flush ruleset`. Foreign tables are preserved.
+- NetworkManager: profiles `efw-<name>` with the derived UUID. Foreign
+  profiles are not edited; initial setup adopts an existing profile only with
+  explicit confirmation **[planned]**.
+- firewalld **[planned]**: the transition is explicit — the installer
+  detects it, shows its state, asks for confirmation, stops and masks
+  firewalld and keeps a snapshot (`nft -j list ruleset`, zones) to revert with
+  `efwctl firewalld restore`. Presence on Rocky 10 Minimal is still to be
+  verified (checklist).
 
-- nftables: tabelas `inet efw_filter` e `ip efw_nat` (nomes reservados). O
-  agent nunca executa `flush ruleset`. Tabelas de terceiros são preservadas
-  e listadas no diagnóstico.
-- NetworkManager: perfis com nome `efw-<papel>-<iface>` e
-  `connection.uuid` registrado no store. Perfis alheios não são editados;
-  a configuração inicial só adota um perfil existente com confirmação.
-- firewalld: a transição é explícita — o instalador detecta, mostra o
-  estado, exige confirmação, para e mascara o firewalld e guarda um
-  snapshot (`nft -j list ruleset`, zonas) para reverter com
-  `efwctl firewalld restore`. Verificar presença no Rocky 10 Minimal (aberto
-  no checklist).
+## Build and distribution
 
-## Build e distribuição
-
-`make linux` gera binários estáticos (`CGO_ENABLED=0`) para
-`linux/amd64` com `GOAMD64=v3` e `linux/arm64`, com hashes em
-`dist/SHA256SUMS`; `make repro` prova reprodutibilidade. Etapa 4: RPM
-`edge-fwsec` (Requires: nftables, NetworkManager, selinux-policy; unidades
-systemd; módulo SELinux), instalador `install.sh` (DNF, idempotente) e ISO
-por arquitetura via `mkksiso` sobre a mídia oficial verificada, ambos
-convergindo no mesmo RPM e no mesmo `efwctl bootstrap`.
+`make linux` builds static binaries (`CGO_ENABLED=0`) for `linux/amd64` with
+`GOAMD64=v3` and `linux/arm64`, with hashes in `dist/SHA256SUMS`; `make repro`
+proves reproducibility. Stage 4 **[planned]**: RPM `edge-fwsec` (Requires:
+nftables, NetworkManager, selinux-policy; systemd units; SELinux module),
+idempotent DNF installer `install.sh`, and one ISO per architecture via
+`mkksiso` over verified official media, both converging on the same RPM and
+the same `efwctl bootstrap`.
