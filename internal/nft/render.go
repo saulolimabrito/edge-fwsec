@@ -463,3 +463,9 @@ func nameSet(names []string) string {
 	}
 	return "{ " + strings.Join(q, ", ") + " }"
 }
+
+// RemoveScript deletes the project's tables (state before any confirmed
+// revision). Other tables are untouched.
+func RemoveScript() string {
+	return fmt.Sprintf("table inet %[1]s\ndelete table inet %[1]s\ntable ip %[2]s\ndelete table ip %[2]s\n", FilterTable, NATTable)
+}
