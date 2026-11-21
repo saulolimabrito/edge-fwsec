@@ -49,7 +49,7 @@ internal/       Go packages: sysinfo, web (API, access check), auth (accounts, b
                 store (revisions), agent (state machine + socket protocol), fsutil, textdiff
 ui/             Svelte console; `ui/dist` is generated and embedded (only `.keep` is tracked)
 tests/topology  WAN/LAN/VLAN/MGMT topology in network namespaces
-tests/policy    policy traffic scenarios (36 checks)
+tests/policy    policy traffic scenarios (40 checks)
 tests/agent     agent lifecycle with real traffic (38 checks)
 tests/nm        NetworkManager checkpoint lifecycle (46 checks)
 docs/           architecture, threat model, checklist, topology, support matrix

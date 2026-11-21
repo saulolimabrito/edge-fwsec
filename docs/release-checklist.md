@@ -100,9 +100,13 @@ single-family rule (it is now filtered); default-policy log had no limit (now
 10/s); the VLAN client had no namespace of its own in the topology; the test
 server hung in `getfqdn()`.
 
-Open (not blocking stage 3): SNAT to a fixed address and DHCP/DHCPv6 client
-rules are only verified by rendering and `nft --check`, not with traffic;
-hairpin NAT is out of scope for v1 (support matrix).
+- [x] Fixed-address IPv4 SNAT with real TCP traffic. On Rocky Linux 10.3
+  aarch64 with SELinux enforcing, `tests/policy/scenarios.sh` passed 40/40
+  on 2026-11-21. The upstream HTTP server observed the configured secondary
+  WAN address (203.0.113.99) and the LAN client received HTTP 200.
+
+Open: DHCP/DHCPv6 client rules still need traffic tests. Hairpin NAT is out
+of scope for v1 (support matrix).
 
 ## Stage 3 — Full operation (in progress)
 

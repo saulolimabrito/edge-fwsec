@@ -127,5 +127,27 @@ expect "refused batch left previous ruleset intact" diff -q "$W/applied.txt" "$W
 expect "third-party table still preserved" bash -c "ip netns exec efw-fw nft list tables | grep -q 'table inet thirdparty'"
 expect_http "traffic still flows after refused batch" efw-lan "http://198.51.100.10/" 200
 
+echo "== Fixed-address SNAT"
+# Use a secondary WAN address so the observed source distinguishes SNAT
+# from masquerade. Keep this after the baseline ruleset comparisons.
+SNAT_ADDRESS=203.0.113.99
+python3 -I - "$CFG" "$W/snat.json" "$SNAT_ADDRESS" <<'PY' || exit 1
+import json
+import sys
+
+source, destination, address = sys.argv[1:]
+with open(source) as config:
+    policy = json.load(config)
+rule = next(rule for rule in policy["nat"]["source"] if rule["id"] == "lan-masq")
+rule.update(mode="snat", to_address=address)
+with open(destination, "w") as config:
+    json.dump(policy, config)
+PY
+expect "secondary WAN address for fixed SNAT" nsx efw-fw ip -4 address add "$SNAT_ADDRESS/32" dev wan0
+"$EFWCTL" policy render "$W/snat.json" > "$W/snat.nft" || exit 1
+expect "apply fixed SNAT policy" nsx efw-fw nft -f "$W/snat.nft"
+expect_http "lan -> inet v4 works with fixed SNAT" efw-lan "http://198.51.100.10/?fixed-snat" 200
+expect "inet sees the fixed SNAT source 203.0.113.99" grep -Eq '^(::ffff:)?203\.0\.113\.99 .*"GET /\?fixed-snat HTTP/' "$W/inet80.log"
+
 echo "passed: $PASSES  failed: $FAILS"
 [[ $FAILS -eq 0 ]]
