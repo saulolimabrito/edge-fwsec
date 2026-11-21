@@ -1,4 +1,4 @@
-// Policy model types mirroring internal/policy (schema_version 1).
+// Policy model types mirroring internal/policy (schema_version 2).
 
 export type Role = 'wan' | 'lan' | 'mgmt' | 'opt';
 
@@ -84,19 +84,19 @@ export interface Config {
   routes: Route[];
   networks: NetworkObj[];
   services: ServiceObj[];
-  admin: { port: number; interfaces: string[]; sources: string[] };
+  admin: { port: number; ssh: boolean; ssh_port: number; interfaces: string[]; sources: string[] };
   firewall: { default_input: 'drop' | 'reject'; default_forward: 'drop' | 'reject' | 'accept'; log_default: boolean; rules: Rule[] };
   nat: { source: SourceNat[]; port_forwards: PortForward[] };
 }
 
 export function emptyConfig(): Config {
   return {
-    schema_version: 1,
+    schema_version: 2,
     interfaces: [],
     routes: [],
     networks: [],
     services: [],
-    admin: { port: 443, interfaces: [], sources: [] },
+    admin: { port: 443, ssh: false, ssh_port: 22, interfaces: [], sources: [] },
     firewall: { default_input: 'drop', default_forward: 'drop', log_default: true, rules: [] },
     nat: { source: [], port_forwards: [] },
   };

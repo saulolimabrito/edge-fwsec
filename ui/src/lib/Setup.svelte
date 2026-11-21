@@ -6,7 +6,7 @@
   const devices = $derived(live.current?.data.interfaces.filter((i) => i.kind !== 'loopback' && i.kind !== 'vlan') ?? []);
   let wan = $state({ device: '', v4: 'dhcp' as 'dhcp' | 'static', addr: '', gw: '', v6: 'slaac' as 'slaac' | 'dhcp6' | 'none' });
   let lan = $state({ device: '', addr: '192.168.1.1/24', v6: '' });
-  let mgmt = $state({ separate: true, device: '', addr: '10.99.0.1/24' });
+  let mgmt = $state({ separate: true, device: '', addr: '10.99.0.1/24', ssh: true });
   let error = $state<string | null>(null);
 
   function build(e: SubmitEvent) {
@@ -24,6 +24,7 @@
     if (mgmt.separate) c.interfaces.push({ name: 'mgmt', role: 'mgmt', device: mgmt.device, ipv4: { mode: 'static', addresses: [mgmt.addr] }, ipv6: { mode: 'none' } });
     if (wan.v4 === 'static' && wan.gw) c.routes.push({ destination: '0.0.0.0/0', gateway: wan.gw, interface: 'wan' });
     c.admin.interfaces = [mgmt.separate ? 'mgmt' : 'lan'];
+    c.admin.ssh = mgmt.ssh;
     const lanNet = lan.addr.replace(/\.\d+\//, '.0/');
     c.networks.push({ name: 'lan_net', prefixes: [lanNet, ...(lan.v6 ? [lan.v6.replace(/::[0-9a-f]*\//i, '::/')] : [])] });
     c.services.push({ name: 'ping', entries: [{ protocol: 'icmp' }, { protocol: 'icmpv6' }] });
@@ -75,6 +76,7 @@
       {:else}
         <p class="hint">The console will be served on the LAN interface.</p>
       {/if}
+      <label class="check"><input type="checkbox" bind:checked={mgmt.ssh} /> Allow SSH from the management network (keeps remote recovery possible)</label>
     </fieldset>
     {#if error}<p class="err span2" role="alert">{error}</p>{/if}
     <div class="row span2"><button class="primary" type="submit">Generate configuration and review</button></div>

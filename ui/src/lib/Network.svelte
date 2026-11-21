@@ -152,6 +152,8 @@
     <h2 id="h-console">Console access</h2>
     <div class="form inline">
       <label>HTTPS port <input type="number" min="1" max="65535" bind:value={cfg.admin.port} /></label>
+      <label class="check"><input type="checkbox" bind:checked={cfg.admin.ssh} /> Also allow SSH</label>
+      {#if cfg.admin.ssh}<label>SSH port <input type="number" min="1" max="65535" bind:value={cfg.admin.ssh_port} /></label>{/if}
       <fieldset>
         <legend>Interfaces that serve the console</legend>
         {#each cfg.interfaces.filter((i) => i.role !== 'wan') as it (it.name)}

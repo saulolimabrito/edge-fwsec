@@ -128,7 +128,7 @@
             <tr class="implicit"><td class="num">–</td><td colspan={dir === 'forward' ? 10 : 9}>Established and related traffic accepted, invalid dropped</td></tr>
             {#if dir === 'input'}
               <tr class="implicit"><td class="num">–</td><td colspan="9">Loopback, essential ICMPv6 (ND, MLD, errors), DHCP/DHCPv6 replies on dynamic links</td></tr>
-              <tr class="implicit"><td class="num">–</td><td colspan="9">Console HTTPS port {cfg.admin.port} on {listText(cfg.admin.interfaces, 'no interface')}{cfg.admin.sources.length ? ` from ${listText(cfg.admin.sources)}` : ''}</td></tr>
+              <tr class="implicit"><td class="num">–</td><td colspan="9">Console HTTPS port {cfg.admin.port}{cfg.admin.ssh ? ` and SSH port ${cfg.admin.ssh_port}` : ''} on {listText(cfg.admin.interfaces, 'no interface')}{cfg.admin.sources.length ? ` from ${listText(cfg.admin.sources)}` : ''}</td></tr>
             {:else}
               <tr class="implicit"><td class="num">–</td><td colspan="10">ICMPv6 errors (including Packet Too Big)</td></tr>
               {#each cfg.nat.port_forwards.filter((p) => !p.disabled) as pf (pf.id)}
