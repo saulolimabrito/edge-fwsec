@@ -8,6 +8,8 @@
 # (veth; peers in efwn-wan / efwn-lan namespaces). Disposable VM only.
 #
 # usage: sudo EFW_TEST_VM=1 tests/install/e2e.sh phase1|phase2|reboot-check [mgmt-dev]
+# (run it detached, e.g. with systemd-run: phase1 reactivates the management
+# profile and can briefly interrupt an SSH session)
 #   phase1        bootstrap, first configuration, confirm, traffic, access, deadline rollback
 #   phase2        start a change with a long window and leave it pending (then reboot the VM)
 #   reboot-check  after the reboot: pending change gone, confirmed revision active
@@ -47,9 +49,21 @@ topology() {
   ip -n efwn-lan route replace default via 192.168.10.1
   ip -n efwn-wan route replace 192.168.0.0/16 via 203.0.113.2 2>/dev/null || true
   mkdir -p $W/www; echo ok >$W/www/index.html
+  # Same server as tests/policy/httpd.py: http.server's getfqdn() stalls in
+  # namespaces without DNS.
+  cat >$W/httpd.py <<'PY'
+import functools, http.server, socketserver, sys
+class S(http.server.ThreadingHTTPServer):
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "efw-test", self.server_address[1]
+h = functools.partial(http.server.SimpleHTTPRequestHandler, directory=sys.argv[2])
+S((sys.argv[1], 80), h).serve_forever()
+PY
   if ! ip netns pids efwn-wan | grep -q .; then
-    ip netns exec efwn-wan python3 -I -m http.server --bind 198.51.100.10 --directory $W/www 80 >$W/wan-http.log 2>&1 &
+    ip netns exec efwn-wan python3 -I $W/httpd.py 198.51.100.10 $W/www >$W/wan-http.log 2>&1 &
   fi
+  for _ in $(seq 50); do ip netns exec efwn-wan ss -Hltn 'sport = :80' | grep -q . && break; sleep 0.2; done
 }
 
 config() { # config FILE LANOUT(yes|no)
@@ -149,7 +163,17 @@ reboot-check)
   topology; sleep 8; login
   expect "agent and console running after reboot" bash -c "systemctl is-active -q efw-agent && systemctl is-active -q efw-web"
   expect "pending change abandoned at boot" bash -c "[[ \$(testing) == False ]]"
-  expect "history shows the recovery" bash -c "api GET '/api/v1/policy/history?limit=50' | grep -q '\"action\":\"recover\"'"
+  # Clean shutdown: SIGTERM makes the agent roll back before exiting.
+  # Power loss: the agent abandons the pending revision at the next start.
+  # Most recent rollback-type event decides which path ran.
+  path=$(api GET '/api/v1/policy/history?limit=50' | python3 -I -c '
+import json, sys
+ev = [e for e in json.load(sys.stdin)["history"] if e["action"] in ("recover", "rollback")]
+e = ev[-1] if ev else None
+if e and e["action"] == "recover": print("power loss: abandoned at startup, revision %d" % e["revision"])
+elif e and "agent stopped" in e["result"]: print("clean shutdown: rolled back on SIGTERM, revision %d" % e["revision"])
+')
+  expect "history explains the rollback (${path:-none found})" test -n "$path"
   expect "confirmed ruleset active after reboot" bash -c "nft list chain inet efw_filter forward | grep -q efw:rule:lan-out"
   expect "confirmed LAN address active after reboot" bash -c "ip -br addr show eth91 | grep -q 192.168.10.1/24"
   expect "LAN egress works after reboot" lan_http

@@ -1,4 +1,4 @@
-policy_module(efw, 1.0.1)
+policy_module(efw, 1.0.2)
 
 ########################################
 # Declarations
@@ -99,8 +99,10 @@ read_files_pattern(efw_web_t, efw_conf_t, efw_conf_t)
 # Talk to the agent, and nothing else privileged.
 stream_connect_pattern(efw_web_t, efw_var_run_t, efw_var_run_t, efw_agent_t)
 
-# Interface state: sysfs, /proc/net, uptime, os-release.
+# Interface state: sysfs, /proc/net, uptime, os-release; Go's listener reads
+# /proc/sys/net/core/somaxconn.
 kernel_read_system_state(efw_web_t)
+kernel_read_net_sysctls(efw_web_t)
 kernel_read_network_state(efw_web_t)
 dev_read_sysfs(efw_web_t)
 dev_read_urand(efw_web_t)

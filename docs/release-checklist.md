@@ -6,16 +6,14 @@ checked.
 
 ## ▶ Next concrete step
 
-Stage 4, SELinux convergence on the clean VM `efw-inst` (Lima, Rocky 10.3
-aarch64), where edge-fwsec 0.4.0-0.2 is installed by `packaging/install.sh`.
-State left there: module `efw` loaded from a local build at priority 400
-(over the RPM's 200) and both domains PERMISSIVE (`semanage permissive -l`)
-to collect denials. Next: `ausearch -m avc -ts today | audit2allow` for
-`efw_agent_t`/`efw_web_t`, add the needed rules to `packaging/selinux/efw.te`,
-then `semanage permissive -d efw_agent_t efw_web_t`, `semodule -X 400 -r efw`,
-rebuild the RPM (release 0.3), upgrade with the installer and rerun
-`tests/install/e2e.sh phase1` enforcing with zero AVCs; then `phase2`, a
-real reboot (`limactl stop/start efw-inst`) and `reboot-check`.
+Stage 4, ISO: build one ISO per architecture with `mkksiso` from the verified
+official Rocky Linux 10.3 Minimal media, with a kickstart that adds the same
+signed edge-fwsec RPM and its dependencies as an offline repository and runs
+the same first-access preparation as `packaging/install.sh` (no IP changes,
+bootstrap credential on the console). Keep disk selection interactive. Boot
+and install it in UEFI on aarch64 (QEMU/HVF on the Apple Silicon host) and
+x86_64 (CI lab), then run `tests/install/e2e.sh` on each install and compare
+services, permissions, SELinux labels and versions with the installer path.
 
 ## External items / blockers
 
@@ -150,7 +148,7 @@ of scope for v1 (support matrix).
   profiles).
 - [x] Recovery `efwctl`: `status`, `diff`, `apply`, `confirm`, `rollback`,
   `history`, `show`, `recover` (direct store access when the agent is down).
-- [ ] Real VM reboot during a pending change (needs the systemd unit; stage 4)
+- [x] Real VM reboot during a pending change (see Stage 4: clean shutdown and power cut)
 - [ ] SSH access on management interfaces in the model (schema 2 + migration)
 - [x] HTTPS with self-signed certificate and custom upload, one-time bootstrap,
   login, sessions, CSRF, rate limiting. `go test ./internal/auth ./internal/tlsutil
@@ -185,8 +183,21 @@ of scope for v1 (support matrix).
   nftables applied, confirm, masquerade, console unreachable from WAN/LAN, deadline rollback.
   Defects found and fixed: `nnp_transition` needed for NoNewPrivileges units and for nft;
   sd_notify socket labelled `kernel_t`; isolated rpm keyring needs `rpm_var_lib_t`.
+- [x] SELinux confined domains `efw_agent_t` / `efw_web_t` in enforcing mode (`efw-inst`,
+  edge-fwsec 0.4.0-0.3, module efw 1.0.2, 2026-11-21): `tests/install/e2e.sh phase1` 20/20 with
+  0 AVC/SELINUX_ERR records during the run; services confirmed in their domains with `ps -eZ`.
+  Denials found and fixed during convergence (domains temporarily permissive, then removed):
+  `nnp_transition` for the units and for nft, sd_notify socket labelled `kernel_t`,
+  `/proc/sys/net` reads by the agent and by Go's listener.
+- [x] Real reboot during a pending change, enforcing, 0 AVCs, on `efw-inst`:
+  clean shutdown → agent rolled back revision 7 on SIGTERM; hard power cut
+  (`limactl stop --force`) → revision 8 abandoned at boot ("abandoned revision left under
+  test"); after both, confirmed revision 5 active (ruleset, LAN address, LAN egress), checked
+  with `e2e.sh reboot-check` (6/6). Note: Lima's SSH-over-vsock forwarder looped after a stop
+  (`accept: bad file descriptor`, 4 GB log); fixed with `.ssh.overVsock=false` on the test VM.
+- [x] Upgrade 0.2 → 0.3 with the installer kept configuration, accounts and confirmed revision.
 - [ ] Signed RPMs with the release key
-- [ ] SELinux module and hardened systemd units, validated in enforcing mode
+- [x] SELinux module and hardened systemd units, validated in enforcing mode (see below)
 - [ ] Idempotent installer (checks Rocky 10, architecture, signature, conflicts)
 - [ ] Explicit and reversible firewalld transition
 - [ ] One ISO per architecture (mkksiso over verified official media), offline install
