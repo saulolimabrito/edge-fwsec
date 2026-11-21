@@ -40,6 +40,10 @@ commands:
 
   bootstrap [hours]          console only: issue a one-time credential (default 24h) to create
                              or reset an administrator from the web console
+  firstboot [--mgmt-interface DEV] [--force]
+                             prepare first access once (both install paths): choose the
+                             management interface (no address changes), write
+                             /etc/edge-fwsec/web.env, issue a credential, show it on the console
   recover                    console recovery: reapply the last confirmed revision.
                              Uses efw-agent when it answers; otherwise reads the
                              store directly (root, agent stopped).
@@ -92,6 +96,8 @@ func main() {
 		os.Exit(recoverCmd())
 	case "bootstrap":
 		os.Exit(bootstrapCmd(os.Args[2:]))
+	case "firstboot":
+		os.Exit(firstbootCmd(os.Args[2:]))
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)

@@ -1,0 +1,17 @@
+[Unit]
+Description=Edge FWSec first-access preparation (runs once)
+Documentation=https://github.com/saulolimabrito/edge-fwsec/blob/main/docs/architecture.md
+# Same step for the ISO and the installer: skipped once web.env exists.
+ConditionPathExists=!/etc/edge-fwsec/web.env
+Wants=network-online.target
+After=network-online.target efw-agent.service
+Before=efw-web.service getty.target serial-getty@ttyS0.service serial-getty@ttyAMA0.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/efwctl firstboot
+StandardOutput=journal+console
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

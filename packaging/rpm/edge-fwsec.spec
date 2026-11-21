@@ -50,6 +50,7 @@ install -Dm0755 bin/efw-web   %{buildroot}%{_bindir}/efw-web
 install -Dm0755 bin/efwctl    %{buildroot}%{_bindir}/efwctl
 install -Dm0644 packaging/systemd/efw-agent.service %{buildroot}%{_unitdir}/efw-agent.service
 install -Dm0644 packaging/systemd/efw-web.service   %{buildroot}%{_unitdir}/efw-web.service
+install -Dm0644 packaging/systemd/efw-firstboot.service %{buildroot}%{_unitdir}/efw-firstboot.service
 install -Dm0644 packaging/sysusers.d/edge-fwsec.conf %{buildroot}%{_sysusersdir}/edge-fwsec.conf
 install -Dm0644 packaging/tmpfiles.d/edge-fwsec.conf %{buildroot}%{_tmpfilesdir}/edge-fwsec.conf
 install -Dm0644 packaging/sysctl.d/90-edge-fwsec.conf %{buildroot}%{_sysctldir}/90-edge-fwsec.conf
@@ -67,10 +68,10 @@ install -Dm0644 SHA256SUMS %{buildroot}%{_docdir}/%{name}/SHA256SUMS
 %selinux_modules_install -s %{selinuxtype} %{_datadir}/selinux/packages/%{selinuxtype}/efw.pp.bz2
 %tmpfiles_create edge-fwsec.conf
 %sysctl_apply 90-edge-fwsec.conf
-%systemd_post efw-agent.service efw-web.service
+%systemd_post efw-agent.service efw-web.service efw-firstboot.service
 
 %preun
-%systemd_preun efw-web.service efw-agent.service
+%systemd_preun efw-web.service efw-agent.service efw-firstboot.service
 
 %postun
 %systemd_postun_with_restart efw-agent.service efw-web.service
@@ -90,6 +91,7 @@ restorecon -R %{_bindir}/efw-agent %{_bindir}/efw-web %{_sharedstatedir}/efw %{_
 %{_bindir}/efwctl
 %{_unitdir}/efw-agent.service
 %{_unitdir}/efw-web.service
+%{_unitdir}/efw-firstboot.service
 %{_sysusersdir}/edge-fwsec.conf
 %{_tmpfilesdir}/edge-fwsec.conf
 %{_sysctldir}/90-edge-fwsec.conf
