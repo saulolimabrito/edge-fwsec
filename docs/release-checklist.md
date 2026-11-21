@@ -21,10 +21,12 @@ Antes: confirmar na documentação oficial do nftables a atomicidade de
 
 | Item | Comando | Resultado | O que falta |
 |---|---|---|---|
-| Repositório remoto | `gh repo view saulolimabrito/edge-fwsec` | `Could not resolve to a Repository` | Autorização para criar o repositório (público ou privado) e enviar `main`. Até lá: commits locais. GitHub Issues e CI dependem disso. |
-| Licença | — | não definida | Decisão do mantenedor (ex.: GPL-3.0, Apache-2.0). |
-| Rocky 10 Minimal: firewalld presente por padrão? | — | não verificado (VM atual é GenericCloud, sem firewalld nem nftables) | Instalar a partir da ISO Minimal oficial em VM e registrar `rpm -q firewalld nftables`. |
-| VM x86_64 | — | não disponível localmente (host Apple Silicon) | Runner x86_64 (CI) ou host x86_64 para testes de instalação/ISO e boot UEFI. |
+| Licença ([#5](https://github.com/saulolimabrito/edge-fwsec/issues/5)) | — | não definida; repositório já é público | Decisão do mantenedor (ex.: GPL-3.0, Apache-2.0). |
+| Rocky 10 Minimal: firewalld presente por padrão? ([#6](https://github.com/saulolimabrito/edge-fwsec/issues/6)) | — | não verificado (VM atual é GenericCloud, sem firewalld nem nftables) | Instalar a partir da ISO Minimal oficial em VM e registrar `rpm -q firewalld nftables`. |
+| VM x86_64 ([#7](https://github.com/saulolimabrito/edge-fwsec/issues/7)) | — | não disponível localmente (host Apple Silicon) | Host ou runner x86_64 com KVM para testes de instalação/ISO e boot UEFI. |
+
+Repositório: https://github.com/saulolimabrito/edge-fwsec (público, criado em
+2026-11-21). Acompanhamento por etapa nas Issues #1–#4.
 
 ## Etapa 1 — Base executável ✅ (2026-11-21)
 
@@ -51,12 +53,13 @@ Antes: confirmar na documentação oficial do nftables a atomicidade de
 - [x] CLI `efwctl version|system|interfaces [--json]` verificada na VM.
 - [x] Topologia WAN/LAN/VLAN/MGMT definida e verificada
   (`docs/test-topology.md`): 3×10/10 PASS na VM.
-- [x] CI escrito (`.github/workflows/ci.yml`: check + repro + netns em
-  x86_64 e arm64; testes Go em container Rocky 10). **Não executado**:
-  falta o remoto.
+- [x] CI no GitHub verde (run 44934235705): `check` (make check + make repro +
+  topologia netns 10/10) em ubuntu-24.04 x86_64 e ubuntu-24.04-arm; testes Go
+  em container Rocky Linux 10.3 nas duas arquiteturas. Primeiro run falhou
+  porque o container `rockylinux:10` não declara PATH e o `setup-go` o
+  substituía; corrigido fixando PATH no container.
 
-Em aberto da etapa 1: executar o CI no GitHub; tema claro não revisado
-visualmente (somente escuro).
+Em aberto da etapa 1: tema claro não revisado visualmente (somente escuro).
 
 ## Etapa 2 — Motor de políticas
 
