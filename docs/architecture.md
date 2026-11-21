@@ -1,6 +1,6 @@
 # Arquitetura — Edge FWSec v1
 
-Status: etapa 1 implementada (leitura). Seções marcadas **[planejado]** são o
+Status: etapas 1 (leitura) e 2 (motor de políticas) implementadas. Seções marcadas **[planejado]** são o
 contrato para as etapas seguintes; mudanças nelas exigem atualizar este
 arquivo e o modelo de ameaças.
 
@@ -19,7 +19,7 @@ HA, BGP/OSPF, IDS/IPS, VPN, multi-WAN, plugins, NAT66/NPTv6.
                          ▼  protocolo tipado, uma operação por mensagem   [planejado]
                       efw-agent (root com capabilities restritas)
                          ├─ store de revisões  /var/lib/efw/
-                         ├─ nftables (libnftables JSON via `nft -j -f -`, sem shell)
+                         ├─ nftables (script gerado → `nft --check -f -` → `nft -f -`, stdin, sem shell)
                          └─ NetworkManager (D-Bus: Settings, Checkpoint*)
  console local ──▶ efwctl (lê o store diretamente; root)
 ```
@@ -51,16 +51,38 @@ Qualquer outro método em `/api/` → 405; caminho desconhecido → 404 JSON.
 Cabeçalhos: CSP `default-src 'self'` sem inline, `X-Frame-Options: DENY`,
 `nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` na API.
 
-## Modelo de configuração [planejado, etapa 2]
+## Modelo de configuração (implementado: `internal/policy`)
 
-Documento único, versionado por `schema_version` (inteiro) e serializado em
-JSON canônico. Entidades: `interfaces` (papel wan/lan/mgmt/opt, IPv4/IPv6
-estático ou DHCP/SLAAC cliente), `vlans` (pai, VID 1–4094), `routes`
-(família explícita), `objects.networks`, `objects.services`,
-`firewall.rules` (lista ordenada; posição = ordem de avaliação),
-`firewall.default_policy` por direção, `nat.source` (masquerade/SNAT, só
-IPv4), `nat.port_forwards` (DNAT IPv4 + regra de forward associada gerada e
-exibida), `admin` (redes autorizadas, certificado).
+Documento único com `schema_version: 1`, lido com `Decode` estrito (campo
+desconhecido ou dado extra = erro) e gravado com `Canonical` (JSON
+determinístico). Exemplo completo: `internal/policy/testdata/edge.json`.
+
+| Seção | Conteúdo |
+|---|---|
+| `interfaces[]` | nome lógico, papel `wan/lan/mgmt/opt`, device do kernel, `vlan {parent,id}`, `ipv4 {mode: none/static/dhcp}`, `ipv6 {mode: none/static/slaac/dhcp6}` |
+| `routes[]` | destino, gateway (mesma família), interface lógica, métrica |
+| `networks[]` | objeto de rede com prefixos IPv4 e/ou IPv6 |
+| `services[]` | objeto de serviço: entradas `tcp/udp` (faixas de portas) ou `icmp/icmpv6` |
+| `admin` | porta HTTPS, interfaces lógicas autorizadas (nunca WAN), origens opcionais |
+| `firewall` | `default_input` (drop/reject), `default_forward` (drop/reject/accept), `log_default`, `rules[]` ordenadas |
+| `nat` | `source[]` (masquerade/snat, só IPv4), `port_forwards[]` (DNAT IPv4) |
+
+Regras: `id`, `direction` (input/forward), `in`, `out`, `family`
+(any/ipv4/ipv6), `source`/`destination` (nomes de objeto ou literais),
+`service`, `action` (accept/drop/reject), `log`, `disabled`. A posição na
+lista é a ordem de avaliação dentro da direção.
+
+Validação (`Validate`) devolve todos os problemas com caminho
+(`firewall.rules[2].source[0]`). Principais checagens: identificadores
+`^[a-z][a-z0-9_-]{0,31}$` e devices compatíveis com IFNAMSIZ (nada que
+precise de escape no nftables); VID 1–4094; família de endereços;
+sobreposição de prefixos entre interfaces; um único WAN; gateway na mesma
+família; objetos sem bits de host; faixas de porta; referências existentes;
+regra cuja combinação de origem/destino/serviço/família nunca casa;
+`default_input: accept` recusado; gerenciamento sem interface ou no WAN
+recusado; NAT só IPv4; conflitos de port forward (mesma interface,
+protocolo, endereço e portas sobrepostas); port forward que sombreia a
+porta do painel; remapeamento de faixa para porta única recusado.
 
 ### Revisões
 
@@ -75,6 +97,41 @@ Store em `/var/lib/efw/revisions/<n>.json` + `state.json` atualizado por
 escrita atômica (arquivo temporário + `fsync` + `rename` + `fsync` do
 diretório). Concorrência: confirmar um draft exige `base_revision ==
 confirmed` (controle otimista); conflito → 409 com diff.
+
+## Geração nftables (implementado: `internal/nft`)
+
+`Render` revalida e gera um script com o idioma de substituição atômica,
+verificado no nftables 1.1.5 do Rocky 10.3:
+
+```
+table inet efw_filter
+delete table inet efw_filter
+table ip efw_nat
+delete table ip efw_nat
+table inet efw_filter { ... }
+table ip efw_nat { ... }
+```
+
+Ordem das cadeias:
+
+- `input` (policy drop): `ct state` vmap → `lo` → ICMPv6 essencial → DHCP/DHCPv6 cliente nas
+  interfaces que usam → acesso ao painel nas interfaces de gerenciamento → regras do usuário →
+  log padrão (limitado a 10/s) → `reject` se a política for reject.
+- `forward` (policy drop ou accept): `ct state` → erros ICMPv6 → aceites implícitos dos port
+  forwards (`ct status dnat`, avaliados antes das regras do usuário) → regras do usuário → log
+  padrão → reject.
+- `ip efw_nat`: `prerouting` com DNAT e `postrouting` com masquerade/SNAT.
+
+ICMPv6 segue a RFC 4890: erros (incluindo Packet Too Big) sempre; ND só com
+hop limit 255; MLD só de link-local; redirect não é aceito. Regras usam
+`iifname`/`oifname` (o `iif` exige a interface existente no carregamento).
+Conjuntos de prefixos e portas são normalizados (o nftables recusa
+intervalos sobrepostos). `Runner.Apply` executa `nft --check -f -` e depois
+`nft -f -` via `exec`, sem shell. Saída de referência:
+`internal/nft/testdata/edge.nft` (teste de ouro).
+
+Limites da v1: sem NAT66/NPTv6, sem hairpin NAT (cliente da LAN acessando o
+IP do WAN), sem regras de saída (`output` fica aberto).
 
 ## Fluxo de mudança [planejado, etapa 3]
 

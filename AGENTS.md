@@ -23,6 +23,9 @@ NetworkManager para interfaces/VLANs/rotas.
 | Servidor local em 127.0.0.1:8080 | `make run` |
 | UI em modo dev com proxy para :8080 | `cd ui && npm run dev` |
 | Topologia de teste (só em VM descartável, como root) | `EFW_TEST_VM=1 tests/topology/netns.sh up\|verify\|down` |
+| Validar / gerar / checar no kernel uma configuração | `efwctl policy validate\|render\|check <arquivo>` |
+| Atualizar a saída de ouro do gerador (revisar o diff!) | `go test ./internal/nft -update` |
+| Cenários de tráfego da política (VM descartável, root) | `EFW_TEST_VM=1 tests/policy/scenarios.sh <efwctl> internal/policy/testdata/edge.json tests/topology/netns.sh` |
 | VM de teste local (macOS, Lima) | `limactl start --name=efw-dev --mount-none template:rocky-10` |
 
 Testes Linux em macOS: compile o binário de teste com
@@ -36,9 +39,11 @@ nmcli na estação de desenvolvimento.
 cmd/efw-web     servidor web sem privilégios (console + API)
 cmd/efwctl      CLI local de diagnóstico e recuperação
 cmd/efw-agent   (etapa 3) serviço privilegiado que aplica mudanças
-internal/       pacotes Go (sysinfo, web, version; depois policy, nft, nm, store, auth)
+internal/       pacotes Go: sysinfo, web, version, policy (modelo+validação), nft (gerador+loader);
+                depois nm, store, auth
 ui/             console Svelte; `ui/dist` é gerado e embutido (só `.keep` é versionado)
 tests/topology  topologia WAN/LAN/VLAN/MGMT em namespaces
+tests/policy    cenários de tráfego da política (36 checagens)
 docs/           arquitetura, ameaças, checklist, topologia, matriz de suporte
 ```
 
@@ -71,8 +76,8 @@ docs/           arquitetura, ameaças, checklist, topologia, matriz de suporte
 2. Sem TLS + autenticação, o servidor só escuta em loopback
    (`checkLoopback` em `cmd/efw-web`). Não remover essa trava antes da
    etapa 3 estar completa.
-3. O projeto só altera as tabelas nftables que possui (`inet efw`, `ip efw_nat`
-   — nomes finais em `docs/architecture.md`). Tabelas alheias são preservadas.
+3. O projeto só altera as tabelas nftables que possui (`inet efw_filter` e
+   `ip efw_nat`), por substituição atômica; nunca `flush ruleset`. Tabelas alheias são preservadas.
 4. Toda aplicação de mudança tem prazo controlado pelo serviço; sem
    confirmação, volta para a última revisão confirmada — inclusive após
    reinício do processo ou da máquina.
@@ -92,5 +97,6 @@ docs/           arquitetura, ameaças, checklist, topologia, matriz de suporte
 - Desenvolvimento: macOS arm64, Go 1.27.4, Node 26, npm.
 - VM de teste: Lima `efw-dev`, Rocky Linux 10.3 aarch64 (imagem GenericCloud,
   não Minimal), kernel 6.12.0-264, NetworkManager 1.58, SELinux enforcing,
-  sem nftables e sem firewalld instalados por padrão nessa imagem.
+  sem nftables e sem firewalld instalados por padrão nessa imagem
+  (nftables 1.1.5 instalado depois via `dnf` para os testes).
 - A VM `rocky10-kea` pertence a outro projeto: não usar nem alterar.

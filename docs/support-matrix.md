@@ -26,5 +26,7 @@ suportadas (requisito do Rocky/RHEL 10).
 | Firewall stateful, regras ordenadas | sim | sim | política padrão por família |
 | ICMPv6 essencial (ND, RA, PMTU/Packet Too Big, erros) | — | sim | sempre permitido de forma restrita |
 | Masquerade / SNAT | sim | **não** | NAT66/NPTv6 fora da v1 |
-| DNAT / port forward | sim | **não** | IPv6: liberar por regra de forward |
+| DNAT / port forward | sim | **não** | IPv6: liberar por regra de forward; faixa de portas é encaminhada sem remapear |
+| Hairpin NAT (LAN → IP público do WAN) | **não** | — | fora da v1 |
+| Filtragem de saída do próprio appliance | **não** | **não** | cadeia `output` aberta na v1 |
 | Multi-WAN, VPN, IDS/IPS, HA, BGP | não | não | roadmap pós-v1 |

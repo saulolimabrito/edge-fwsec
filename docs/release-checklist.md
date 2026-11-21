@@ -6,16 +6,17 @@ marcados.
 
 ## ▶ Próximo passo concreto
 
-Etapa 2, primeiro incremento: criar `internal/policy` com o modelo
-versionado (`schema_version: 1`) para interfaces/VLANs/rotas/objetos/regras/
-NAT, validação (referências, prefixos IPv4/IPv6, VID, conflitos de
-port-forward) e testes de unidade; depois `internal/nft` gerando o ruleset
-das tabelas `inet efw_filter` / `ip efw_nat` e um teste em namespaces que
-aplica o ruleset no `efw-fw` (instalar `nftables` na VM `efw-dev`) e prova
-allow/deny stateful IPv4/IPv6 com a topologia de `docs/test-topology.md`.
-Antes: confirmar na documentação oficial do nftables a atomicidade de
-`nft -f` com `delete table` + `add table` no mesmo lote e o comportamento de
-`nft -j` no nftables do Rocky 10.
+Etapa 3, primeiro incremento: `internal/store` com revisões
+`draft/testing/confirmed` em `/var/lib/efw` (escrita atômica: temporário +
+`fsync` + `rename` + `fsync` do diretório; `state.json` com
+`confirmed`, `testing` e `deadline`; controle otimista por
+`base_revision`), testes de unidade incluindo falha no meio da escrita; em
+seguida o esqueleto do `cmd/efw-agent` com socket Unix e protocolo tipado
+(`Validate`, `Diff`, `Apply{revision, timeout}`, `Confirm`, `Rollback`,
+`Status`), aplicando nftables via `nft.Runner` com prazo controlado pelo
+agent e teste em namespace de timeout → rollback para a confirmada. Antes:
+confirmar na documentação do NetworkManager (D-Bus `CheckpointCreate`,
+`rollback_timeout`, flags) o comportamento no NM 1.58 do Rocky 10.
 
 ## Pendências externas / bloqueios
 
@@ -61,15 +62,46 @@ Repositório: https://github.com/saulolimabrito/edge-fwsec (público, criado em
 
 Em aberto da etapa 1: tema claro não revisado visualmente (somente escuro).
 
-## Etapa 2 — Motor de políticas
+## Etapa 2 — Motor de políticas ✅ (2026-11-21)
 
-- [ ] Modelo versionado + validação (unidade)
-- [ ] Gerador nftables (`inet efw_filter`, `ip efw_nat`) com testes de ouro
-- [ ] `nft --check` do lote antes de aplicar; aplicação em transação única
-- [ ] Namespaces: allow/deny stateful IPv4 e IPv6
-- [ ] Namespaces: masquerade/SNAT, DNAT/port forward IPv4 com regra de forward associada
-- [ ] Namespaces: ICMPv6 essencial (ND, PMTU) preservado com política deny
-- [ ] Tabelas de terceiros preservadas (teste com tabela alheia carregada)
+Ambiente: VM `efw-dev` (Rocky 10.3 aarch64, kernel 6.12.0-264, nftables
+1.1.5). Comando: `EFW_TEST_VM=1 tests/policy/scenarios.sh` → 36/36 PASS em
+3 execuções seguidas; sem namespaces nem tabelas residuais.
+
+- [x] Modelo versionado (`schema_version: 1`) + validação:
+  `go test ./internal/policy` (fixture válida, decodificação estrita,
+  round-trip canônico, 32 casos de erro com caminho, famílias de regra).
+- [x] Gerador com teste de ouro (`internal/nft/testdata/edge.nft`),
+  determinismo, recusa de config inválida, só tabelas próprias,
+  normalização de conjuntos.
+- [x] Semântica do nftables 1.1.5 verificada na VM: idioma
+  declarar/`delete table`/redefinir funciona com tabela ausente ou
+  presente e troca a policy da cadeia; lote com erro deixa a tabela
+  anterior intacta; `nft -c` detecta erro semântico; `iif` exige device
+  existente (por isso `iifname`). Documentação oficial: `nft -f` aplica em
+  uma operação atômica (wiki nftables, "Atomic rule replacement").
+- [x] `efwctl policy validate|render|check`.
+- [x] Allow/deny stateful IPv4 e IPv6 com tráfego real.
+- [x] Masquerade (origem 203.0.113.2 vista pelo destino) e port forward
+  IPv4 com origem preservada e regra de forward associada; IPv6 roteado sem
+  NAT.
+- [x] ICMPv6 essencial sob política drop: ND após flush de vizinhos e
+  Packet Too Big encaminhado (PMTU 1280 aprendido pelo cliente).
+- [x] Painel: 443 aceito só pela rede de gerenciamento (v4/v6), bloqueado
+  pelo WAN e pela LAN.
+- [x] VLAN 30 (convidados) com reject distinguido de drop e log no kernel.
+- [x] Tabela de terceiros preservada; reaplicação idempotente; lote quebrado
+  recusado sem alterar o ruleset.
+- [x] Cenários adicionados ao CI (x86_64 e arm64).
+
+Defeitos encontrados e corrigidos: objeto misto IPv4/IPv6 recusado em
+regra de uma família (agora filtra); log padrão sem limite (agora 10/s);
+cliente VLAN sem namespace próprio na topologia; servidor de teste travando
+em `getfqdn()`.
+
+Em aberto (não bloqueiam a etapa 3): SNAT para endereço fixo e regras de
+DHCP/DHCPv6 cliente só verificados por renderização e `nft --check`, sem
+tráfego; hairpin NAT fora da v1 (matriz de suporte).
 
 ## Etapa 3 — Operação completa
 
