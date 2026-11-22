@@ -208,7 +208,14 @@ if [[ $installed == "$pkg_evr" ]]; then
 else
   dnfargs=(-y)
   [[ -n $REPO ]] && dnfargs+=(--repofrompath "edge-fwsec-local,$REPO" --setopt=edge-fwsec-local.gpgcheck=0)
-  run dnf "${dnfargs[@]}" install "$RPM_FILE"
+  if ! run dnf "${dnfargs[@]}" install "$RPM_FILE"; then
+    # Offline appliances (e.g. installed from the ISO) cannot reach the
+    # configured repositories. Retry with only the local package and the
+    # local repository, if one was given; dependencies must already be met.
+    say "    configured repositories unreachable; retrying offline (only $RPM_FILE${REPO:+ and $REPO})"
+    run dnf "${dnfargs[@]}" --disablerepo='*' ${REPO:+--enablerepo=edge-fwsec-local} install "$RPM_FILE" \
+      || fail "dnf could not install $RPM_FILE (see $LOG); offline installs need --repo with the missing dependencies"
+  fi
 fi
 
 step "Preparing first access"

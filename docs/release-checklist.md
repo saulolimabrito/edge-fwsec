@@ -172,9 +172,8 @@ NAT is out of scope for v1 (support matrix).
   receive focus; "rolls back to revision 0" wording; author spacing in
   History; the draft was lost on reload (now kept in `sessionStorage`, with a
   restore race fixed).
-- [ ] UI flows against an installed appliance with real nftables and
-  NetworkManager (stage 4 VM), including reconnecting through a new
-  management address
+- [x] UI flows against an installed appliance with real nftables and NetworkManager,
+  including reconnecting and confirming through a new management address (see Stage 4)
 
 ## Stage 4 — Distribution
 
@@ -223,6 +222,26 @@ NAT is out of scope for v1 (support matrix).
   labels, sysctl) is identical (35 lines). The first comparison found two differences, both from
   the installer preparing first access with its own code; fixed by making the installer use the
   same `efwctl firstboot` / `efw-firstboot.service` as the ISO.
+- [x] aarch64 ISO install, hard power cut during a pending change (2026-11-22, QEMU/HVF):
+  `e2e.sh phase2` + `kill -9` of QEMU + `reboot-check` 6/6, enforcing, 0 AVCs.
+- [x] Console flow on the ISO-installed appliance (2026-11-22, browser through the UI dev server
+  proxied to the appliance's real API): sign in, change the management address
+  (DHCP → static 10.0.2.20/24) in Network, validated diff with the management-access warning,
+  apply with a 5-minute window; the old tab reports that the appliance stopped answering and
+  shows the new address and the time limit; sign-in through the new address shows the
+  countdown banner; Keep changes → revision 5 confirmed; history records author, time and
+  result. Defects found and fixed (commit "Never let a failed network change survive its
+  rollback"): a profile whose device was absent (veth gone after reboot) failed the whole
+  change; an activation still in flight completed after the checkpoint rollback and left the
+  new management address with no revision under test; recovery after a power cut logged
+  `network rollback failed` for the same reason; the console waited forever when an apply
+  moved its own address. After the fix: the same flow succeeds, and a repeated power cut
+  records no network rollback failure and restores the confirmed address.
+- [x] Offline upgrade of an ISO-installed appliance (no internet): the installer retries with
+  the local package only when the configured repositories are unreachable (0.4 → 0.5 kept
+  configuration, services active, enforcing).
+- [ ] Release builds from a clean tag: the 0.4 test RPM reported version `a8a2210-dirty`
+  (built before its changes were committed); 0.5 reports `32c0ca0`.
 - [ ] x86_64 ISO built, installed offline in UEFI and compared (CI KVM runner)
 - [ ] Pre-release: clean install and upgrade
 
