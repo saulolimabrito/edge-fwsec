@@ -160,10 +160,46 @@ func (c *Client) ownedProfiles() (map[string]dbus.ObjectPath, []string, error) {
 	return out, devs, nil
 }
 
-// Activate brings a profile up. device "/" lets NM pick (virtual devices).
-func (c *Client) Activate(conn, device dbus.ObjectPath) error {
+// Activate brings a profile up and returns the active-connection path.
+// device "/" lets NM pick (virtual devices).
+func (c *Client) Activate(conn, device dbus.ObjectPath) (dbus.ObjectPath, error) {
 	var active dbus.ObjectPath
-	return c.obj(nmPath).Call(ifNM+".ActivateConnection", 0, conn, device, dbus.ObjectPath("/")).Store(&active)
+	err := c.obj(nmPath).Call(ifNM+".ActivateConnection", 0, conn, device, dbus.ObjectPath("/")).Store(&active)
+	return active, err
+}
+
+// NMActiveConnectionState values (nm-dbus-types).
+const (
+	acActivating   = 1
+	acActivated    = 2
+	acDeactivating = 3
+	acDeactivated  = 4
+)
+
+// waitActive waits until NetworkManager finishes an activation (it is
+// asynchronous). It returns an error if the activation ends deactivated.
+// An activation still pending at the timeout (e.g. DHCP without a server)
+// is not an error: NM keeps trying and the deadline protects the change.
+func (c *Client) waitActive(active dbus.ObjectPath, timeout time.Duration) error {
+	end := time.Now().Add(timeout)
+	for {
+		v, err := c.obj(active).GetProperty("org.freedesktop.NetworkManager.Connection.Active.State")
+		if err != nil {
+			// The object disappears when the activation is torn down.
+			return fmt.Errorf("activation vanished: %w", err)
+		}
+		st, _ := v.Value().(uint32)
+		switch st {
+		case acActivated:
+			return nil
+		case acDeactivating, acDeactivated:
+			return errors.New("activation failed")
+		}
+		if time.Now().After(end) {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 // Network applies profiles under a checkpoint. It implements the agent's
@@ -208,13 +244,31 @@ func (n *Network) Begin(ctx context.Context, profiles []Profile, deadline time.D
 		return "", fmt.Errorf("checkpoint: %w", err)
 	}
 	if err := n.write(profiles); err != nil {
-		if _, rerr := n.Client.CheckpointRollback(cp); rerr != nil {
+		// write() waited for its activations, so nothing still in flight
+		// can overwrite the restored state after this rollback.
+		if rerr := n.rollbackChecked(cp); rerr != nil {
 			err = errors.Join(err, fmt.Errorf("rollback: %w", rerr))
 		}
 		return "", err
 	}
 	return string(cp), nil
 }
+
+func (n *Network) rollbackChecked(cp dbus.ObjectPath) error {
+	res, err := n.Client.CheckpointRollback(cp)
+	if err != nil {
+		return err
+	}
+	for dev, r := range res {
+		if r != 0 {
+			return fmt.Errorf("rollback of %s returned NMRollbackResult %d", dev, r)
+		}
+	}
+	return nil
+}
+
+// ActivationTimeout bounds how long write waits for each activation.
+var ActivationTimeout = 30 * time.Second
 
 func (n *Network) write(profiles []Profile) error {
 	keep := map[string]bool{}
@@ -229,11 +283,26 @@ func (n *Network) write(profiles []Profile) error {
 		if err != nil {
 			return fmt.Errorf("profile %s: %w", p.ID, err)
 		}
+		// A device that does not exist now (unplugged NIC, VLAN whose parent
+		// is missing) is not an error: the profile is saved and
+		// NetworkManager activates it when the device appears.
 		dev := dbus.ObjectPath("/")
-		if d, ok := n.Client.Device(p.Device); ok && p.Parent == "" {
+		if p.Parent == "" {
+			d, ok := n.Client.Device(p.Device)
+			if !ok {
+				continue
+			}
 			dev = d
+		} else if _, ok := n.Client.Device(p.Parent); !ok {
+			continue
 		}
-		if err := n.Client.Activate(path, dev); err != nil {
+		active, err := n.Client.Activate(path, dev)
+		if err != nil {
+			return fmt.Errorf("activate %s: %w", p.ID, err)
+		}
+		// Wait: an activation still in flight could otherwise overwrite a
+		// rollback performed right after a later failure.
+		if err := n.Client.waitActive(active, ActivationTimeout); err != nil {
 			return fmt.Errorf("activate %s: %w", p.ID, err)
 		}
 	}
@@ -256,7 +325,8 @@ func (n *Network) Commit(_ context.Context, checkpoint string) error {
 	return n.Client.CheckpointDestroy(dbus.ObjectPath(checkpoint))
 }
 
-// Rollback restores the checkpoint. A missing checkpoint (NetworkManager
+// Rollback restores the checkpoint (an empty checkpoint means none was
+// recorded, e.g. Begin failed). A missing checkpoint (NetworkManager
 // restarted or its own timer fired) is reported so the caller can rewrite
 // the confirmed profiles instead.
 func (n *Network) Rollback(_ context.Context, checkpoint string) error {
@@ -264,19 +334,10 @@ func (n *Network) Rollback(_ context.Context, checkpoint string) error {
 	if err != nil {
 		return err
 	}
-	if !slices.Contains(cps, dbus.ObjectPath(checkpoint)) {
+	if checkpoint == "" || !slices.Contains(cps, dbus.ObjectPath(checkpoint)) {
 		return ErrCheckpointGone
 	}
-	res, err := n.Client.CheckpointRollback(dbus.ObjectPath(checkpoint))
-	if err != nil {
-		return err
-	}
-	for dev, r := range res {
-		if r != 0 {
-			return fmt.Errorf("rollback of %s returned NMRollbackResult %d", dev, r)
-		}
-	}
-	return nil
+	return n.rollbackChecked(dbus.ObjectPath(checkpoint))
 }
 
 // Restore rewrites and activates the confirmed profiles without a

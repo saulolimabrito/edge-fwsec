@@ -198,8 +198,8 @@ export const api = {
   history: (limit = 200) => request<AgentResponse>('GET', `/api/v1/policy/history?limit=${limit}`),
   validate: (config: Config) => request<AgentResponse>('POST', '/api/v1/policy/validate', { config }),
   diff: (config: Config) => request<AgentResponse>('POST', '/api/v1/policy/diff', { config }),
-  apply: (config: Config, base_revision: number, timeout_seconds: number, message: string) =>
-    request<AgentResponse>('POST', '/api/v1/policy/apply', { config, base_revision, timeout_seconds, message }),
+  apply: (config: Config, base_revision: number, timeout_seconds: number, message: string, signal?: AbortSignal) =>
+    request<AgentResponse>('POST', '/api/v1/policy/apply', { config, base_revision, timeout_seconds, message }, signal),
   confirm: (revision: number) => request<AgentResponse>('POST', '/api/v1/policy/confirm', { revision }),
   rollback: () => request<AgentResponse>('POST', '/api/v1/policy/rollback', {}),
 

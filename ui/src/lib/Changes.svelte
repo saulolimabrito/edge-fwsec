@@ -9,6 +9,23 @@
   let busy = $state(false);
   let timeout = $state(120);
   let note = $state('');
+  // Set when an apply that changes management access got no answer: the
+  // page's own address may be gone. Shows where and until when to confirm.
+  let lostContact = $state<{ urls: string[]; until: Date } | null>(null);
+
+  const newConsoleUrls = $derived.by(() => {
+    const c = app.draft;
+    if (!c) return [];
+    const urls: string[] = [];
+    for (const it of c.interfaces.filter((i) => c.admin.interfaces.includes(i.name))) {
+      for (const a of [...(it.ipv4.addresses ?? []), ...(it.ipv6.addresses ?? [])]) {
+        const host = a.split('/')[0] ?? '';
+        urls.push(`https://${host.includes(':') ? `[${host}]` : host}${c.admin.port === 443 ? '' : `:${c.admin.port}`}/`);
+      }
+      if (it.ipv4.mode === 'dhcp' || it.ipv6.mode === 'slaac' || it.ipv6.mode === 'dhcp6') urls.push(`the address ${it.device} gets by DHCP/SLAAC`);
+    }
+    return urls;
+  });
 
   const mgmtChanged = $derived.by(() => {
     const a = app.confirmed, b = app.draft;
@@ -44,12 +61,20 @@
     busy = true;
     problems = [];
     message = null;
+    lostContact = null;
+    const started = Date.now();
     try {
-      await api.apply(app.draft, app.confirmedRevision, timeout, note);
+      // A change to management access may remove the address this page
+      // uses before the answer arrives; do not wait forever.
+      const signal = mgmtChanged ? AbortSignal.timeout(20000) : undefined;
+      await api.apply(app.draft, app.confirmedRevision, timeout, note, signal);
       note = '';
       await app.refreshStatus();
     } catch (e) {
-      if (e instanceof ApiError) {
+      const noAnswer = (e instanceof ApiError && e.code === 'network') || (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError'));
+      if (mgmtChanged && noAnswer) {
+        lostContact = { urls: newConsoleUrls, until: new Date(started + timeout * 1000) };
+      } else if (e instanceof ApiError) {
         message = e.message;
         problems = e.problems;
         if (e.code === 'conflict') message = 'Another change was confirmed meanwhile. Review the new configuration and redo your edits.';
@@ -84,6 +109,16 @@
     </div>
   {/if}
   <Problems {problems} {message} />
+  {#if lostContact}
+    <div class="warn-box" role="alert">
+      <strong>The appliance stopped answering on this address.</strong>
+      The change probably moved the management address. Before
+      <span class="mono">{lostContact.until.toLocaleTimeString()}</span>, open the console at
+      {#each lostContact.urls as u, i (u)}{#if i > 0}, {/if}<span class="mono">{u}</span>{/each},
+      sign in again and choose <em>Keep changes</em>. If nobody confirms, the appliance returns to revision
+      {app.confirmedRevision} by itself. Local console: <code>efwctl status</code>, <code>efwctl confirm N</code>.
+    </div>
+  {/if}
 </section>
 
 {#if diff !== null && app.dirty && !app.status?.testing}

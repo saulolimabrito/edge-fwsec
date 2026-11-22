@@ -239,6 +239,9 @@ func (a *Agent) applyLocked(ctx context.Context, req *Request, author string) Re
 			a.Log.Error("network apply failed, rolling back", "revision", rev.Number, "err", err)
 			a.Store.Audit(store.Event{Action: "apply_failed", Revision: rev.Number, Author: author, Result: "network: " + err.Error()})
 			a.rollbackLocked(ctx, "efw-agent", "network apply failed")
+			// Begin already rolled its checkpoint back; reassert the confirmed
+			// profiles as well, so no partial network change can survive.
+			a.reassertNetworkLocked(ctx)
 			return fail(CodeApply, "network: "+err.Error())
 		}
 		if err := a.Store.SetCheckpoint(rev.Number, cp); err != nil {
@@ -311,6 +314,24 @@ func (a *Agent) rollbackNetworkLocked(ctx context.Context) {
 	if err := a.Network.Rollback(ctx, st.Testing.Checkpoint, confirmed); err != nil {
 		a.Log.Error("CRITICAL: network rollback failed", "checkpoint", st.Testing.Checkpoint, "err", err)
 		a.Store.Audit(store.Event{Action: "network_rollback_failed", Revision: st.Testing.Revision, Author: "efw-agent", Result: err.Error()})
+	}
+}
+
+// reassertNetworkLocked rewrites the confirmed network profiles (no
+// checkpoint involved).
+func (a *Agent) reassertNetworkLocked(ctx context.Context) {
+	if a.Network == nil {
+		return
+	}
+	var confirmed *policy.Config
+	if st := a.Store.State(); st.Confirmed != 0 {
+		if r, err := a.Store.Get(st.Confirmed); err == nil {
+			confirmed, _ = r.Decode()
+		}
+	}
+	if err := a.Network.Rollback(ctx, "", confirmed); err != nil {
+		a.Log.Error("CRITICAL: could not reassert the confirmed network", "err", err)
+		a.Store.Audit(store.Event{Action: "network_rollback_failed", Revision: a.Store.State().Confirmed, Author: "efw-agent", Result: err.Error()})
 	}
 }
 

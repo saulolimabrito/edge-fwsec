@@ -357,6 +357,9 @@ func TestNetworkFailureRollsBackFirewallToo(t *testing.T) {
 	if strings.Contains(f.last(), "chain") || a.Store.State().Testing != nil {
 		t.Fatal("firewall must stay at the confirmed (empty) state")
 	}
+	if n := a.Network.(*fakeNet); n.rolled != 1 {
+		t.Fatalf("a failed network apply must reassert the confirmed network (rolled=%d)", n.rolled)
+	}
 }
 
 func TestConfirmRefusedWhenCheckpointCannotBeReleased(t *testing.T) {
