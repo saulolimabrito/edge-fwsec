@@ -30,7 +30,7 @@ ssh_guest=(ssh -q -i ssh -p 2222 -o BatchMode=yes -o ConnectTimeout=4
 ready=false
 for _ in {1..50}; do
     if ssh-keyscan -T 2 -t ed25519 -p 2222 127.0.0.1 > known_hosts 2>/dev/null &&
-        "${ssh_guest[@]}" 'systemctl is-active --quiet efw-agent efw-web efw-firstboot'; then
+        "${ssh_guest[@]}" 'systemctl is-active --quiet efw-agent && systemctl is-active --quiet efw-web && systemctl is-active --quiet efw-firstboot'; then
         ready=true
         break
     fi
@@ -38,12 +38,18 @@ for _ in {1..50}; do
     sleep 3
 done
 "$ready" || { echo 'first boot did not bring up SSH and the appliance services' >&2; exit 1; }
+grep -aq 'Edge FWSec console:' first-boot.private.log
+grep -aq 'One-time administrator credential' first-boot.private.log
+echo 'PASS: first boot displayed the console URL and the one-time credential on serial' | tee -a validation.txt
 
 "${ssh_guest[@]}" 'bash -se' <<'GUEST' | tee -a validation.txt
 test -d /sys/firmware/efi
 test "$(uname -m)" = x86_64
 test "$(getenforce)" = Enforcing
-! rpm -q firewalld >/dev/null
+if rpm -q firewalld >/dev/null; then
+    echo "unexpected firewalld package in appliance image" >&2
+    exit 1
+fi
 test "$(stat -c %a /etc/issue.d/50-edge-fwsec.issue)" = 600
 grep -q 'One-time administrator credential' /etc/issue.d/50-edge-fwsec.issue
 test "$(stat -c %a /var/lib/efw-web/bootstrap.json)" = 600
@@ -86,3 +92,11 @@ done
 "${ssh_guest[@]}" 'test "$(systemctl show -p Result --value efw-iso-e2e.service)" = success'
 grep -Eq '^passed: 20 +failed: 0$' validation.txt
 "${ssh_guest[@]}" 'bash -s' < "$repo/tests/install/fingerprint.sh" > fingerprint.txt
+"${ssh_guest[@]}" 'bash -se' <<'GUEST' | tee -a validation.txt
+events=$(ausearch -m AVC,USER_AVC,SELINUX_ERR -ts boot 2>/dev/null) || test "$?" -eq 1
+if grep -E 'efw_(agent|web)_t|comm="nft"' <<< "$events"; then
+    echo "appliance SELinux denials detected" >&2
+    exit 1
+fi
+echo 'PASS: no SELinux denials for the appliance domains or nft since boot'
+GUEST

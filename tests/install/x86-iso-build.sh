@@ -16,10 +16,10 @@ awk -F '[() ]+' '/^SHA256 / {print $4 "  " $2}' "$iso.CHECKSUM" | sha256sum -c -
 
 top=$(mktemp -d)
 mkdir "$top/SOURCES"
-cp /src/dist/rpm/edge-fwsec-0.4.0-x86_64.tar.gz "$top/SOURCES/"
+cp /product/dist/rpm/edge-fwsec-0.4.0-x86_64.tar.gz "$top/SOURCES/"
 rpmbuild -bb --target x86_64 --define "_topdir $top" \
     --define 'efw_version 0.4.0' --define "efw_release 0.4.g$commit" \
-    --define "efw_commit $commit" /src/dist/rpm/edge-fwsec.spec
+    --define "efw_commit $commit" /product/dist/rpm/edge-fwsec.spec
 rpm=("$top"/RPMS/x86_64/edge-fwsec-*.rpm)
 test -f "${rpm[0]}"
 key_name='Edge FWSec disposable CI signing <ci-signing@edge-fwsec.invalid>'
@@ -31,7 +31,7 @@ rpmsign --define "_gpg_name $key_name" --addsign "${rpm[0]}"
 # for this x86 runner. The base Kickstart and offline repository stay unchanged.
 mkksiso() { command mkksiso --cmdline 'console=ttyS0,115200n8' "$@"; }
 export -f mkksiso
-cp -r /src/packaging/iso "$top/iso"
+cp -r /product/packaging/iso "$top/iso"
 printf '\nbootloader --append="console=ttyS0,115200n8"\n' >> "$top/iso/test-overlay.ks"
 bash "$top/iso/build-iso.sh" --iso "$iso" --rpm "${rpm[0]}" \
     --key test-signing-key.asc --test-ssh-key ssh.pub --out appliance-test.iso

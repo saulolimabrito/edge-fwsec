@@ -11,8 +11,12 @@ jobs:
   offline-first-access:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      PRODUCT_COMMIT: 375213385de89c8ca9dc512f76ab71061b72da98
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
@@ -23,7 +27,8 @@ jobs:
           cache-dependency-path: ui/package-lock.json
       - name: Build the x86-64-v3 RPM sources and prepare the lab
         run: |
-          make rpm-src
+          git worktree add --detach "$RUNNER_TEMP/appliance-source" "$PRODUCT_COMMIT"
+          make -C "$RUNNER_TEMP/appliance-source" rpm-src
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf acl
           test -c /dev/kvm
@@ -41,7 +46,8 @@ jobs:
       - name: Build and sign the lab RPM and appliance ISO on Rocky Linux 10
         run: |
           docker run --rm --privileged -v "$PWD:/src:ro" -v "$RUNNER_TEMP/appliance-x86:/lab" \
-            rockylinux:10 bash /src/tests/install/x86-iso-build.sh "$(git rev-parse --short=12 HEAD)"
+            -v "$RUNNER_TEMP/appliance-source:/product:ro" \
+            rockylinux:10 bash /src/tests/install/x86-iso-build.sh "${PRODUCT_COMMIT:0:12}"
       - name: Install from the ISO without a NIC and exercise first access
         run: bash tests/install/x86-iso-boot.sh "$RUNNER_TEMP/appliance-x86"
       - uses: actions/upload-artifact@v4
