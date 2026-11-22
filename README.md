@@ -40,3 +40,10 @@ make linux
 - [docs/release-checklist.md](docs/release-checklist.md) — progress and next step
 - [docs/test-topology.md](docs/test-topology.md)
 - [docs/support-matrix.md](docs/support-matrix.md)
+
+## License
+
+Edge FWSec is free software, licensed under the GNU General Public License
+version 3 only (`GPL-3.0-only`). See [LICENSE](LICENSE). Third-party
+dependencies keep their own licenses (BSD and MIT for the Go modules and the
+bundled frontend code); the release SBOMs list them.

@@ -14,7 +14,7 @@ Name:           edge-fwsec
 Version:        %{efw_version}
 Release:        %{efw_release}%{?dist}
 Summary:        Edge firewall appliance: nftables, NetworkManager and web console
-License:        LicenseRef-Not-Yet-Licensed
+License:        GPL-3.0-only
 URL:            https://github.com/saulolimabrito/edge-fwsec
 Source0:        edge-fwsec-%{version}-%{_arch}.tar.gz
 ExclusiveArch:  x86_64 aarch64
@@ -84,6 +84,7 @@ fi
 restorecon -R %{_bindir}/efw-agent %{_bindir}/efw-web %{_sharedstatedir}/efw %{_sharedstatedir}/efw-web %{_sysconfdir}/edge-fwsec /run/efw >/dev/null 2>&1 || :
 
 %files
+%license LICENSE
 %doc README.md docs/architecture.md docs/threat-model.md docs/support-matrix.md
 %{_docdir}/%{name}/SHA256SUMS
 %{_bindir}/efw-agent

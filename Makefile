@@ -74,7 +74,7 @@ RPM_RELEASE ?= 0.1.g$(COMMIT)
 rpm-src: linux
 	for a in x86_64 aarch64; do \
 	  d=dist/rpm/edge-fwsec-$(RPM_VERSION); rm -rf $$d; mkdir -p $$d/bin $$d/docs; \
-	  cp dist/linux-$$a/* $$d/bin/; cp -R packaging $$d/; cp README.md $$d/; \
+	  cp dist/linux-$$a/* $$d/bin/; cp -R packaging $$d/; cp README.md LICENSE $$d/; \
 	  cp docs/architecture.md docs/threat-model.md docs/support-matrix.md $$d/docs/; \
 	  (cd dist && { command -v sha256sum >/dev/null && sha256sum linux-$$a/* || shasum -a 256 linux-$$a/*; }) > $$d/SHA256SUMS; \
 	  tar --format=ustar -C dist/rpm -czf dist/rpm/edge-fwsec-$(RPM_VERSION)-$$a.tar.gz edge-fwsec-$(RPM_VERSION); \

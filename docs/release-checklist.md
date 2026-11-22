@@ -10,14 +10,14 @@ Close the remaining x86_64 items on the CI KVM runner (full `e2e.sh phase1 <dev>
 installer-vs-ISO fingerprint with `--replace-firewalld`, interactive release ISO), then
 prepare the pre-release from a clean tag: RPMs and ISOs built from the tagged commit,
 signed with the release key (pending decision), SBOMs from `packaging/sbom.py`,
-SHA256SUMS, install/upgrade/recovery guides and the support matrix. The license (#5)
-and the release key are maintainer decisions that block the tag.
+SHA256SUMS, install/upgrade/recovery guides and the support matrix. The release
+signing key is the remaining maintainer decision that blocks the tag.
 
 ## External items / blockers
 
 | Item | Command | Result | What is missing |
 |---|---|---|---|
-| License ([#5](https://github.com/saulolimabrito/edge-fwsec/issues/5)) | — | not chosen; the repository is already public | Maintainer decision (e.g. GPL-3.0, Apache-2.0). |
+| License ([#5](https://github.com/saulolimabrito/edge-fwsec/issues/5)) | — | **GPL-3.0-only** chosen by the maintainer (2026-11-22) | Resolved: `LICENSE` at the root, `License: GPL-3.0-only` and `%license LICENSE` in the RPM, `license` in `ui/package.json`. |
 | Rocky 10 Minimal: is firewalld installed by default? ([#6](https://github.com/saulolimabrito/edge-fwsec/issues/6)) | clean offline installs of the official 10.3 Minimal media, UEFI, no NIC: aarch64 (QEMU 11.1.3/HVF) and x86_64 (KVM, CI run 44944896846) | **yes: `firewalld-2.4.3-4.el10_2` enabled and active**; `nftables-1.1.5-6.el10_2` installed; SELinux enforcing | Resolved: the installer requires `--replace-firewalld` (snapshot + `--restore-firewalld`); the Edge FWSec ISO excludes firewalld. |
 | x86_64 VM ([#7](https://github.com/saulolimabrito/edge-fwsec/issues/7)) | CI run 44944896846 | a GitHub Ubuntu runner with KVM installed the official x86_64 Minimal ISO offline and booted it in UEFI | Use that runner for the x86_64 appliance ISO and installer tests. |
 
