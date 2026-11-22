@@ -12,7 +12,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      PRODUCT_COMMIT: 375213385de89c8ca9dc512f76ab71061b72da98
+      PRODUCT_COMMIT: a20e58284fd38f977bf11fd5ecaea1047ff6ae8c
+      PRODUCT_RELEASE: '0.5'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,7 +47,7 @@ jobs:
         run: |
           docker run --rm --privileged -v "$PWD:/src:ro" -v "$RUNNER_TEMP/appliance-x86:/lab" \
             -v "$RUNNER_TEMP/appliance-source:/product:ro" \
-            rockylinux:10 bash /src/tests/install/x86-iso-build.sh "${PRODUCT_COMMIT:0:12}"
+            rockylinux:10 bash /src/tests/install/x86-iso-build.sh "${PRODUCT_COMMIT:0:12}" "$PRODUCT_RELEASE"
       - name: Install from the ISO without a NIC and exercise first access
         run: bash tests/install/x86-iso-boot.sh "$RUNNER_TEMP/appliance-x86"
       - uses: actions/upload-artifact@v4

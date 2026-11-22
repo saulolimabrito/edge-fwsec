@@ -2,6 +2,7 @@
 # Run in the disposable Rocky Linux package builder used by the x86 ISO lab.
 set -euo pipefail
 commit=${1:?source commit}
+release=${2:?RPM release}
 dnf -y -q install rpm-build rpm-sign gnupg2 selinux-policy-devel systemd-rpm-macros \
     bzip2 make lorax createrepo_c xorriso
 cd /lab
@@ -18,7 +19,7 @@ top=$(mktemp -d)
 mkdir "$top/SOURCES"
 cp /product/dist/rpm/edge-fwsec-0.4.0-x86_64.tar.gz "$top/SOURCES/"
 rpmbuild -bb --target x86_64 --define "_topdir $top" \
-    --define 'efw_version 0.4.0' --define "efw_release 0.4.g$commit" \
+    --define 'efw_version 0.4.0' --define "efw_release $release.g$commit" \
     --define "efw_commit $commit" /product/dist/rpm/edge-fwsec.spec
 rpm=("$top"/RPMS/x86_64/edge-fwsec-*.rpm)
 test -f "${rpm[0]}"

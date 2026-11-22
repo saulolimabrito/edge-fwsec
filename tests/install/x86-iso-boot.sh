@@ -38,7 +38,12 @@ for _ in {1..50}; do
     sudo -n kill -0 "$guest"
     sleep 3
 done
-"$ready" || { echo 'first boot did not bring up SSH and the appliance services' >&2; exit 1; }
+if ! "$ready"; then
+    echo 'first boot did not bring up SSH and all appliance services' >&2
+    "${ssh_guest[@]}" 'systemctl show -p Id -p ActiveState -p Result efw-agent efw-web efw-firstboot' || true
+    grep -aiE 'Kernel panic|No bootable|Failed to start Edge FWSec|Starting Edge FWSec' first-boot.private.log || true
+    exit 1
+fi
 grep -aq 'Edge FWSec console:' first-boot.private.log
 grep -aq 'One-time administrator credential' first-boot.private.log
 echo 'PASS: first boot displayed the console URL and the one-time credential on serial' | tee -a validation.txt
