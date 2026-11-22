@@ -6,13 +6,12 @@ checked.
 
 ## ▶ Next concrete step
 
-Stage 4, x86_64 ISO on the CI KVM runner (run 44944896846 proved KVM + UEFI
-boot of the official media there): build `edge-fwsec-*-x86_64-test.iso` with
-`packaging/iso/build-iso.sh` from the verified x86_64 Minimal ISO and the
-x86_64 RPM, install it offline (no NIC) in UEFI, boot from disk, run
-`tests/install/e2e.sh phase1` and `tests/install/fingerprint.sh`, and compare
-with an installer-path install on the same runner. Then the release key and
-SBOM attachment for the pre-release.
+Close the remaining x86_64 items on the CI KVM runner (full `e2e.sh phase1 <dev>`,
+installer-vs-ISO fingerprint with `--replace-firewalld`, interactive release ISO), then
+prepare the pre-release from a clean tag: RPMs and ISOs built from the tagged commit,
+signed with the release key (pending decision), SBOMs from `packaging/sbom.py`,
+SHA256SUMS, install/upgrade/recovery guides and the support matrix. The license (#5)
+and the release key are maintainer decisions that block the tag.
 
 ## External items / blockers
 
@@ -242,13 +241,28 @@ NAT is out of scope for v1 (support matrix).
   configuration, services active, enforcing).
 - [ ] Release builds from a clean tag: the 0.4 test RPM reported version `a8a2210-dirty`
   (built before its changes were committed); 0.5 reports `32c0ca0`.
-- [ ] x86_64 ISO built, installed offline in UEFI and compared (CI KVM runner)
+- [x] x86_64 test ISO (CI run 44985563301, branch `verify/appliance-x86`, 2026-11-22): built with
+  `packaging/iso/build-iso.sh` from the verified x86_64 Minimal media and the RPM
+  `edge-fwsec-0.4.0-0.5.ga20e58284fd3.el10.x86_64` (sha256
+  0646309947a7f41d483a5690218d8f94952bbef19c12fa2728b1c23be9a408b2) of commit a20e582, signed with
+  a throwaway key. KVM, UEFI, no NIC: Anaconda installed offline and completed; boot from disk,
+  SELinux enforcing, services confined. First access from an external management client with
+  verified TLS: the original one-time credential from the serial console created the
+  administrator and a session, a second use was refused (401), and a new login reached the
+  protected API. Build info, installation serial log and fingerprint: artifact 14738799934.
+  (Earlier runs: 44984106051 with commit 3752133; 44984786026 with a20e582.)
+- [ ] x86_64: full `tests/install/e2e.sh phase1 <dev>` (NetworkManager + nftables traffic,
+  deadline rollback) on the ISO install
+- [ ] x86_64: fingerprint comparison with an installer-path install on the same runner
+  (`install.sh --replace-firewalld`, the official media ships firewalld active)
+- [ ] x86_64: release (interactive) ISO waits for disk selection
 - [ ] Pre-release: clean install and upgrade
 
 ## v1.0.0 acceptance criteria
 
 - [ ] Four complete VM installs: installer and ISO on x86_64 and aarch64.
-- [ ] The ISO installs without network, boots the appliance and reaches first access. (aarch64 done; x86_64 pending)
+- [x] The ISO installs without network, boots the appliance and reaches first access: aarch64
+  (QEMU/HVF, 2026-11-21) and x86_64 (KVM, CI run 44985563301), both UEFI, no NIC, enforcing.
 - [ ] Both install paths deliver the same version and hardening profile per architecture.
 - [ ] The console works from authorized networks and is unreachable from the WAN in the default profile.
 - [ ] IPv4, IPv6, VLANs, routes, stateful firewall and NAT pass with real traffic, per the support matrix.
