@@ -13,16 +13,17 @@ vm=(qemu-system-x86_64 -machine q35,accel=kvm -cpu Haswell-v4 -m 6144 -smp 4
     -drive if=pflash,format=raw,file=vars.fd
     -drive if=virtio,format=qcow2,file=disk.qcow2)
 
-timeout 25m "${vm[@]}" -nic none -serial file:install-serial.log \
+touch install-serial.log first-boot.private.log
+sudo -n timeout 25m "${vm[@]}" -nic none -serial file:install-serial.log \
     -no-reboot -boot once=d -cdrom appliance-test.iso
 echo 'ISO installation ran with -nic none and rebooted' | tee validation.txt
 # Add a NIC only after the install has exited. QEMU's restricted network
 # provides local DHCP and loopback-forwarded management ports.
-timeout 10m "${vm[@]}" -serial file:first-boot.private.log \
+sudo -n timeout 10m "${vm[@]}" -serial file:first-boot.private.log \
     -netdev 'user,id=mgmt,restrict=on,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:8443-:443' \
     -device virtio-net-pci,netdev=mgmt &
 guest=$!
-trap 'kill "$guest" 2>/dev/null || true; wait "$guest" 2>/dev/null || true' EXIT
+trap 'sudo -n kill "$guest" 2>/dev/null || true; wait "$guest" 2>/dev/null || true' EXIT
 
 ssh_guest=(ssh -q -i ssh -p 2222 -o BatchMode=yes -o ConnectTimeout=4
     -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
@@ -34,7 +35,7 @@ for _ in {1..50}; do
         ready=true
         break
     fi
-    kill -0 "$guest"
+    sudo -n kill -0 "$guest"
     sleep 3
 done
 "$ready" || { echo 'first boot did not bring up SSH and the appliance services' >&2; exit 1; }

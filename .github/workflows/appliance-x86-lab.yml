@@ -30,9 +30,8 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/appliance-source" "$PRODUCT_COMMIT"
           make -C "$RUNNER_TEMP/appliance-source" rpm-src
           sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf acl
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf
           test -c /dev/kvm
-          sudo setfacl -m "u:$(id -un):rw" /dev/kvm
           lab="$RUNNER_TEMP/appliance-x86"
           mkdir -m 0700 "$lab"
           ssh-keygen -q -t ed25519 -N '' -f "$lab/ssh"
