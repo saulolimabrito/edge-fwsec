@@ -78,24 +78,27 @@ grep -qi '<title>.*Edge FWSec' console.html
 echo 'PASS: HTTPS console and bootstrap API reached from the management network with verified TLS' | tee -a validation.txt
 
 "${ssh_guest[@]}" 'install -d -m 0700 /var/tmp/efw-iso-lab && cat >/var/tmp/efw-iso-lab/e2e.sh' < "$repo/tests/install/e2e.sh"
-"${ssh_guest[@]}" 'systemd-run --quiet --unit=efw-iso-e2e --remain-after-exit \
-    -E EFW_TEST_VM=1 -E EFW_TEST_BOOTSTRAP_FILE=/etc/issue.d/50-edge-fwsec.issue \
-    /bin/bash /var/tmp/efw-iso-lab/e2e.sh phase1'
+# Keep the guest's administrator login context for the test process.
+# An init_t transient unit cannot set up the test network namespaces.
+"${ssh_guest[@]}" 'bash -se' <<'GUEST'
+cd /var/tmp/efw-iso-lab
+nohup bash -c '
+    EFW_TEST_VM=1 EFW_TEST_BOOTSTRAP_FILE=/etc/issue.d/50-edge-fwsec.issue bash ./e2e.sh phase1
+    printf "%s\n" "$?" > result.tmp
+    mv result.tmp result
+' < /dev/null > e2e.log 2>&1 &
+GUEST
 finished=false
 for _ in {1..100}; do
-    state=$("${ssh_guest[@]}" 'systemctl is-active efw-iso-e2e.service || true' || true)
-    if [[ $state == active || $state == failed ]]; then
-        # A transient service is briefly active before ExecStart exits.
-        if "${ssh_guest[@]}" 'test "$(systemctl show -p MainPID --value efw-iso-e2e.service)" = 0'; then
-            finished=true
-            break
-        fi
+    if "${ssh_guest[@]}" 'test -s /var/tmp/efw-iso-lab/result'; then
+        finished=true
+        break
     fi
     sleep 2
 done
-"${ssh_guest[@]}" 'journalctl -q -u efw-iso-e2e.service -o cat --no-pager' | tee -a validation.txt
+"${ssh_guest[@]}" 'cat /var/tmp/efw-iso-lab/e2e.log' | tee -a validation.txt
 "$finished"
-"${ssh_guest[@]}" 'test "$(systemctl show -p Result --value efw-iso-e2e.service)" = success'
+"${ssh_guest[@]}" 'test "$(cat /var/tmp/efw-iso-lab/result)" = 0'
 grep -Eq '^passed: 20 +failed: 0$' validation.txt
 "${ssh_guest[@]}" 'bash -s' < "$repo/tests/install/fingerprint.sh" > fingerprint.txt
 "${ssh_guest[@]}" 'bash -se' <<'GUEST' | tee -a validation.txt
