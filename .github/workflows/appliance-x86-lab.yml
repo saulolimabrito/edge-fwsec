@@ -1,0 +1,55 @@
+name: Appliance ISO x86_64 lab
+
+on:
+  push:
+    branches: [verify/appliance-x86]
+
+permissions:
+  contents: read
+
+jobs:
+  offline-first-access:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build the x86-64-v3 RPM sources and prepare the lab
+        run: |
+          make rpm-src
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf acl
+          test -c /dev/kvm
+          sudo setfacl -m "u:$(id -un):rw" /dev/kvm
+          lab="$RUNNER_TEMP/appliance-x86"
+          mkdir -m 0700 "$lab"
+          ssh-keygen -q -t ed25519 -N '' -f "$lab/ssh"
+          iso=Rocky-10.3-20261113.0-x86_64-minimal.iso
+          base=https://dl.rockylinux.org/pub/rocky/10/isos/x86_64
+          curl -fLsS --retry 3 --output "$lab/$iso" "$base/$iso"
+          curl -fLsS --retry 3 --output "$lab/$iso.CHECKSUM" "$base/$iso.CHECKSUM"
+          curl -fLsS --retry 3 --output "$lab/$iso.CHECKSUM.asc" "$base/$iso.CHECKSUM.asc"
+          curl -fLsS --retry 3 --output "$lab/rocky-key.asc" https://dl.rockylinux.org/pub/rocky/RPM-GPG-KEY-Rocky-10
+          printf '%s  %s\n' 878a3f92281d3eb91ca9d1a195794d47b5bce4e02a85f351c606709e98481cc4 "$lab/$iso" | sha256sum -c -
+      - name: Build and sign the lab RPM and appliance ISO on Rocky Linux 10
+        run: |
+          docker run --rm --privileged -v "$PWD:/src:ro" -v "$RUNNER_TEMP/appliance-x86:/lab" \
+            rockylinux:10 bash /src/tests/install/x86-iso-build.sh "$(git rev-parse --short=12 HEAD)"
+      - name: Install from the ISO without a NIC and exercise first access
+        run: bash tests/install/x86-iso-boot.sh "$RUNNER_TEMP/appliance-x86"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: x86-appliance-validation
+          path: |
+            ${{ runner.temp }}/appliance-x86/iso-build-info.txt
+            ${{ runner.temp }}/appliance-x86/install-serial.log
+            ${{ runner.temp }}/appliance-x86/validation.txt
+            ${{ runner.temp }}/appliance-x86/fingerprint.txt
