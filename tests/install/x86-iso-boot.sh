@@ -77,29 +77,38 @@ grep -qi '<title>.*Edge FWSec' console.html
     'import json, sys; s = json.load(sys.stdin); assert s["needs_bootstrap"] and s["bootstrap_pending"] and not s["authenticated"]'
 echo 'PASS: HTTPS console and bootstrap API reached from the management network with verified TLS' | tee -a validation.txt
 
-"${ssh_guest[@]}" 'install -d -m 0700 /var/tmp/efw-iso-lab && cat >/var/tmp/efw-iso-lab/e2e.sh' < "$repo/tests/install/e2e.sh"
-# Keep the guest's administrator login context for the test process.
-# An init_t transient unit cannot set up the test network namespaces.
-"${ssh_guest[@]}" 'bash -se' <<'GUEST'
-cd /var/tmp/efw-iso-lab
-nohup bash -c '
-    EFW_TEST_VM=1 EFW_TEST_BOOTSTRAP_FILE=/etc/issue.d/50-edge-fwsec.issue bash ./e2e.sh phase1
-    printf "%s\n" "$?" > result.tmp
-    mv result.tmp result
-' < /dev/null > e2e.log 2>&1 &
-GUEST
-finished=false
-for _ in {1..100}; do
-    if "${ssh_guest[@]}" 'test -s /var/tmp/efw-iso-lab/result'; then
-        finished=true
-        break
-    fi
-    sleep 2
-done
-"${ssh_guest[@]}" 'cat /var/tmp/efw-iso-lab/e2e.log' | tee -a validation.txt
-"$finished"
-"${ssh_guest[@]}" 'test "$(cat /var/tmp/efw-iso-lab/result)" = 0'
-grep -Eq '^passed: 20 +failed: 0$' validation.txt
+# Complete first access from the runner through the management interface.
+# SSH reads the exact credential shown on first boot. It never issues another.
+"${ssh_guest[@]}" 'cat /etc/issue.d/50-edge-fwsec.issue' > firstboot.private
+python3 - <<'PY'
+import json
+import re
+import secrets
+from pathlib import Path
+
+issue = Path("firstboot.private").read_text()
+token = re.search(r"^  ([A-Z0-9-]{29})$", issue, re.MULTILINE)
+assert token, "first-boot credential missing"
+login = {"username": "admin", "password": secrets.token_urlsafe(24)}
+Path("login.private.json").write_text(json.dumps(login))
+Path("bootstrap.private.json").write_text(json.dumps({**login, "token": token[1]}))
+PY
+base="https://$mgmt_ip"
+post=(-H "Origin: $base" -H 'Content-Type: application/json')
+"${https[@]}" "${post[@]}" --data-binary @bootstrap.private.json --cookie-jar bootstrap.cookies \
+    -o bootstrap-response.private.json "$base/api/v1/bootstrap"
+"${https[@]}" --cookie bootstrap.cookies "$base/api/v1/session" | python3 -c \
+    'import json, sys; s = json.load(sys.stdin); assert s["authenticated"] and s["user"] == "admin" and not s["needs_bootstrap"] and not s["bootstrap_pending"]'
+echo 'PASS: the original serial credential created the administrator and an authenticated session' | tee -a validation.txt
+replay_code=$("${https[@]}" --no-fail "${post[@]}" --data-binary @bootstrap.private.json \
+    --output /dev/null --write-out '%{http_code}' "$base/api/v1/bootstrap")
+test "$replay_code" = 401
+echo 'PASS: the consumed credential was refused when used again' | tee -a validation.txt
+"${https[@]}" "${post[@]}" --data-binary @login.private.json --cookie-jar login.cookies \
+    -o login-response.private.json "$base/api/v1/login"
+"${https[@]}" --cookie login.cookies "$base/api/v1/policy/status" | python3 -c \
+    'import json, sys; assert json.load(sys.stdin)["status"]["confirmed"] == 0'
+echo 'PASS: a fresh login reached the protected policy API with no configuration committed' | tee -a validation.txt
 "${ssh_guest[@]}" 'bash -s' < "$repo/tests/install/fingerprint.sh" > fingerprint.txt
 "${ssh_guest[@]}" 'bash -se' <<'GUEST' | tee -a validation.txt
 events=$(ausearch -m AVC,USER_AVC,SELINUX_ERR -ts boot 2>/dev/null) || test "$?" -eq 1

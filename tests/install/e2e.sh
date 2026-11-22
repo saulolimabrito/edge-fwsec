@@ -113,12 +113,7 @@ phase1)
   echo "== access before any configuration"
   expect "console answers on the management address ($MIP)" bash -c "[[ \$(code https://$MIP/api/v1/session) == 200 ]]"
   echo "== bootstrap through the API"
-  if [[ -n ${EFW_TEST_BOOTSTRAP_FILE:-} ]]; then
-    tok=$(sed -n 's/^  \([A-Z0-9-]\{29\}\)$/\1/p' "$EFW_TEST_BOOTSTRAP_FILE")
-  else
-    tok=$(efwctl bootstrap 1 | sed -n 's/^    \([A-Z0-9-]\{29\}\)$/\1/p')
-  fi
-  [[ $tok =~ ^[A-Z0-9-]{29}$ ]] || { echo "missing bootstrap credential" >&2; exit 2; }
+  tok=$(efwctl bootstrap 1 | sed -n 's/^    \([A-Z0-9-]\{29\}\)$/\1/p')
   head -c 18 /dev/urandom | base64 | tr -d '/+=' >$W/pw   # test-only password, kept in $W (0700)
   printf '{"token":"%s","username":"admin","password":"%s"}' "$tok" "$(cat $W/pw)" >$W/boot.json
   api POST /api/v1/bootstrap $W/boot.json | j 'd["csrf"]' >$W/csrf
